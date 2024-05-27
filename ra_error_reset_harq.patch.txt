@@ -1,0 +1,73 @@
+diff --git a/srsue/hdr/stack/mac_nr/mac_nr.h b/srsue/hdr/stack/mac_nr/mac_nr.h
+index 8f503ba8e0..da04d18f99 100644
+--- a/srsue/hdr/stack/mac_nr/mac_nr.h
++++ b/srsue/hdr/stack/mac_nr/mac_nr.h
+@@ -94,6 +94,7 @@ public:
+   uint16_t get_csrnti() { return SRSRAN_INVALID_RNTI; }; // SPS not supported
+   void     set_temp_crnti(uint16_t temp_crnti);
+   void     set_crnti_to_temp();
++  void     reset_harq();
+ 
+   /// procedure sr nr interface
+   void start_ra() { proc_ra.start_by_mac(); }
+diff --git a/srsue/hdr/stack/mac_nr/mac_nr_interfaces.h b/srsue/hdr/stack/mac_nr/mac_nr_interfaces.h
+index 82b0adf31f..7dc3282502 100644
+--- a/srsue/hdr/stack/mac_nr/mac_nr_interfaces.h
++++ b/srsue/hdr/stack/mac_nr/mac_nr_interfaces.h
+@@ -28,6 +28,7 @@ public:
+   virtual bool     set_crnti(uint16_t c_rnti)      = 0;
+   virtual void     set_temp_crnti(uint16_t c_rnti) = 0;
+   virtual void     set_crnti_to_temp()             = 0;
++  virtual void     reset_harq()                    = 0;
+ 
+   // Functions for msg3 manipulation which shall be transparent to the procedure
+   virtual bool msg3_is_transmitted() = 0;
+diff --git a/srsue/src/stack/mac_nr/mac_nr.cc b/srsue/src/stack/mac_nr/mac_nr.cc
+index 4481c96b1d..0a3574b9a1 100644
+--- a/srsue/src/stack/mac_nr/mac_nr.cc
++++ b/srsue/src/stack/mac_nr/mac_nr.cc
+@@ -239,6 +239,20 @@ uint16_t mac_nr::get_crnti()
+   return rntis.get_crnti();
+ }
+ 
++void mac_nr::reset_harq()
++{
++  for (const auto& cc : dl_harq) {
++    if (cc != nullptr) {
++      cc->reset();
++    }
++  }
++  for (const auto& cc : ul_harq) {
++    if (cc != nullptr) {
++      cc->reset();
++    }
++  }
++}
++
+ srsran::mac_sch_subpdu_nr::lcg_bsr_t mac_nr::generate_sbsr()
+ {
+   return proc_bsr.generate_sbsr();
+diff --git a/srsue/src/stack/mac_nr/proc_ra_nr.cc b/srsue/src/stack/mac_nr/proc_ra_nr.cc
+index c56923fdf9..970c05943e 100644
+--- a/srsue/src/stack/mac_nr/proc_ra_nr.cc
++++ b/srsue/src/stack/mac_nr/proc_ra_nr.cc
+@@ -302,6 +302,7 @@ void proc_ra_nr::ra_error()
+   preamble_transmission_counter++;
+   contention_resolution_timer.stop();
+   mac.set_temp_crnti(SRSRAN_INVALID_RNTI);
++  mac.reset_harq();
+   uint32_t backoff_wait;
+   bool     ra_procedure_completed = false; // true = (unsuccessfully) completed, false = uncompleted
+ 
+diff --git a/srsue/src/stack/mac_nr/test/proc_ra_nr_test.cc b/srsue/src/stack/mac_nr/test/proc_ra_nr_test.cc
+index e63ff8f8a6..6ff3115635 100644
+--- a/srsue/src/stack/mac_nr/test/proc_ra_nr_test.cc
++++ b/srsue/src/stack/mac_nr/test/proc_ra_nr_test.cc
+@@ -68,6 +68,7 @@ public:
+   }
+   void set_temp_crnti(uint16_t c_rnti) {}
+   void set_crnti_to_temp() {}
++  void reset_harq() {}
+ 
+   bool msg3_is_transmitted() { return true; }
+   void msg3_flush() {}
