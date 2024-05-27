@@ -106,6 +106,7 @@ struct phy_args_t {
   bool        detect_cp                    = false;
 
   bool nr_store_pdsch_ko = false;
+  uint32_t nr_fix_wideband_cqi = 15;
 
   float    in_sync_rsrp_dbm_th    = -130.0f;
   float    in_sync_snr_db_th      = 1.0f;

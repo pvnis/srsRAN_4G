@@ -445,6 +445,9 @@ static int parse_args(all_args_t* args, int argc, char* argv[])
     ("phy.nr.store_pdsch_ko",
       bpo::value<bool>(&args->phy.nr_store_pdsch_ko)->default_value(false),
       "Dumps the PDSCH baseband samples into a file on KO reception.")
+    ("phy.nr.fix_wideband_cqi",
+      bpo::value<uint32_t>(&args->phy.nr_fix_wideband_cqi)->default_value(15),
+      "Fixes the reported wideband CQI to a constant value. Default 15.")
 
     // UE simulation args
     ("sim.airplane_t_on_ms",
