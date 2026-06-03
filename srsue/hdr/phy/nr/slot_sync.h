@@ -70,6 +70,7 @@ private:
   bool                         forced_rx_time_init = true; // Rx time sync after first receive from radio
   srsran::rf_buffer_t          sfn_sync_buff       = {};
   srsran_slot_cfg_t            slot_cfg            = {};
+  srsran_subcarrier_spacing_t  scs                 = srsran_subcarrier_spacing_15kHz; ///< Cell SCS (for slot indexing)
 };
 } // namespace nr
 } // namespace srsue

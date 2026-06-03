@@ -1014,6 +1014,12 @@ int srsran_ssb_csi_search(srsran_ssb_t*                  q,
     ERROR("Error searching for N_id_2");
     return SRSRAN_ERROR;
   }
+  {
+    const char* fcfo = getenv("SSB_FORCE_CFO");  // DIAGNOSTIC: override coarse CFO
+    if (fcfo != NULL) coarse_cfo_hz = (float)atof(fcfo);
+    const char* td = getenv("SSB_T_DELTA");      // DIAGNOSTIC: nudge PSS timing
+    if (td != NULL) { int d = atoi(td); if ((int)t_offset + d >= 0) t_offset = (uint32_t)((int)t_offset + d); }
+  }
 
   // Remove CP offset prior demodulation
   if (t_offset >= q->cp_sz) {
@@ -1267,20 +1273,9 @@ int srsran_ssb_decode_pbch(srsran_ssb_t*         q,
   return SRSRAN_SUCCESS;
 }
 
-int srsran_ssb_search(srsran_ssb_t* q, const cf_t* in, uint32_t nof_samples, srsran_ssb_search_res_t* res)
+// Single-pass SSB search assuming the input is already coarse-CFO-compensated.
+static int ssb_search_at(srsran_ssb_t* q, const cf_t* in, uint32_t nof_samples, srsran_ssb_search_res_t* res)
 {
-  // Verify inputs
-  if (q == NULL || in == NULL || res == NULL || !isnormal(q->scs_hz)) {
-    return SRSRAN_ERROR_INVALID_INPUTS;
-  }
-
-  if (!q->args.enable_search || !q->args.enable_decode) {
-    ERROR("SSB is not configured to search (%c) and decode (%c)",
-          q->args.enable_search ? 'y' : 'n',
-          q->args.enable_decode ? 'y' : 'n');
-    return SRSRAN_ERROR;
-  }
-
   // Set the SSB search result with default value with PBCH CRC unmatched, meaning no cell is found
   SRSRAN_MEM_ZERO(res, srsran_ssb_search_res_t, 1);
 
@@ -1316,7 +1311,7 @@ int srsran_ssb_search(srsran_ssb_t* q, const cf_t* in, uint32_t nof_samples, srs
   uint32_t N_id_1   = 0;
   float    sss_corr = 0.0f;
   if (srsran_sss_nr_find(ssb_grid, N_id_2, &sss_corr, &N_id_1) < SRSRAN_SUCCESS) {
-    ERROR("Error searching for N_id_2");
+    ERROR("Error searching for N_id_1");
     return SRSRAN_ERROR;
   }
 
@@ -1363,6 +1358,66 @@ int srsran_ssb_search(srsran_ssb_t* q, const cf_t* in, uint32_t nof_samples, srs
   res->measurements = measurements;
   res->measurements.cfo_hz += coarse_cfo_hz;
 
+  return SRSRAN_SUCCESS;
+}
+
+int srsran_ssb_search(srsran_ssb_t* q, const cf_t* in, uint32_t nof_samples, srsran_ssb_search_res_t* res)
+{
+  // Verify inputs
+  if (q == NULL || in == NULL || res == NULL || !isnormal(q->scs_hz)) {
+    return SRSRAN_ERROR_INVALID_INPUTS;
+  }
+
+  if (!q->args.enable_search || !q->args.enable_decode) {
+    ERROR("SSB is not configured to search (%c) and decode (%c)",
+          q->args.enable_search ? 'y' : 'n',
+          q->args.enable_decode ? 'y' : 'n');
+    return SRSRAN_ERROR;
+  }
+
+  // Default result = not found
+  SRSRAN_MEM_ZERO(res, srsran_ssb_search_res_t, 1);
+
+  // Wide carrier-frequency-offset acquisition. The inner PSS time-domain
+  // correlation only tolerates a fraction of the SSB subcarrier spacing of CFO
+  // before it loses coherence; two free-running radios routinely exceed that.
+  // Pre-compensate the input across a grid of candidate offsets (0 first, then
+  // expanding +/-) and keep the first hypothesis that decodes the PBCH (CRC).
+  const float subc_hz = (float)SRSRAN_SUBC_SPACING_NR(q->cfg.scs);
+  const int   step_hz = (int)(subc_hz / 4.0f);     // coarse step ~quarter SCS
+  const int   max_hz  = (int)(1.5f * subc_hz);     // search up to +/-1.5 SCS
+  cf_t*       tmp     = srsran_vec_cf_malloc(nof_samples);
+
+  for (int mag = 0; mag <= max_hz; mag += (step_hz > 0 ? step_hz : max_hz + 1)) {
+    for (int sign = (mag == 0 ? 0 : -1); sign <= 1; sign += 2) {
+      int         cfo_hz = sign * mag;
+      const cf_t* ptr    = in;
+      if (cfo_hz != 0) {
+        if (tmp == NULL) {
+          continue;
+        }
+        srsran_vec_apply_cfo(in, -(float)cfo_hz / (float)q->cfg.srate_hz, tmp, (int)nof_samples);
+        ptr = tmp;
+      }
+      if (ssb_search_at(q, ptr, nof_samples, res) < SRSRAN_SUCCESS) {
+        if (tmp != NULL) {
+          free(tmp);
+        }
+        return SRSRAN_ERROR;
+      }
+      if (res->pbch_msg.crc) {
+        res->measurements.cfo_hz += (float)cfo_hz; // report the absolute CFO
+        if (tmp != NULL) {
+          free(tmp);
+        }
+        return SRSRAN_SUCCESS;
+      }
+    }
+  }
+
+  if (tmp != NULL) {
+    free(tmp);
+  }
   return SRSRAN_SUCCESS;
 }
 

@@ -106,7 +106,10 @@ private:
   std::atomic<bool>            running   = {false};
   cf_t*                        rx_buffer = nullptr;
   double                       srate_hz  = 0; ///< Sampling rate in Hz
-  uint32_t                     slot_sz   = 0; ///< Subframe size (1-ms)
+  uint32_t                     slot_sz   = 0; ///< Subframe size (1-ms), the unit the SSB tracker receives
+  uint32_t                     slots_per_subframe = 1; ///< Cell numerology: 1 for SCS-15, 2 for SCS-30, ...
+  uint32_t                     slot_len  = 0; ///< Samples per slot (= slot_sz / slots_per_subframe)
+  uint32_t                     nof_slots_hyperframe = 10240; ///< Slot index wrap = nslots_per_frame * 1024 SFN
   uint32_t                     tti       = 0;
   srsran::tti_semaphore<void*> tti_semaphore;
   srsran::rf_timestamp_t       last_rx_time;

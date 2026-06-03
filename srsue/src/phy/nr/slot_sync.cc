@@ -78,6 +78,9 @@ int slot_sync::set_sync_cfg(const srsran_ue_sync_nr_cfg_t& cfg)
     logger.info("SYNC: Setting SSB configuration %s Tracking N_id=%d.", ssb_cfg_str.data(), cfg.N_id);
   }
 
+  // Save the cell SCS so the absolute slot index is numbered with the correct numerology (slots-per-frame).
+  scs = cfg.ssb.scs;
+
   // Set the synchronization configuration
   if (srsran_ue_sync_nr_set_cfg(&ue_sync_nr, &cfg) < SRSRAN_SUCCESS) {
     logger.error("SYNC: failed to set cell configuration for N_id %d", cfg.N_id);
@@ -130,7 +133,10 @@ bool slot_sync::run_sfn_sync()
 
   // If in sync, update slot index
   if (outcome.in_sync) {
-    slot_cfg.idx = outcome.sfn * SRSRAN_NSLOTS_PER_FRAME_NR(srsran_subcarrier_spacing_15kHz) + outcome.sf_idx;
+    // Absolute slot index using the cell numerology: outcome.sf_idx is a subframe index (0-9),
+    // so scale by slots-per-subframe (1 for SCS-15, 2 for SCS-30, ...).
+    slot_cfg.idx =
+        outcome.sfn * SRSRAN_NSLOTS_PER_FRAME_NR(scs) + outcome.sf_idx * SRSRAN_NSLOTS_PER_SF_NR(scs);
   }
 
   // Return true if the PHY in-sync
@@ -148,7 +154,10 @@ bool slot_sync::run_camping(srsran::rf_buffer_t& buffer, srsran::rf_timestamp_t&
 
   // If in sync, update slot index
   if (outcome.in_sync) {
-    slot_cfg.idx = outcome.sfn * SRSRAN_NSLOTS_PER_FRAME_NR(srsran_subcarrier_spacing_15kHz) + outcome.sf_idx;
+    // Absolute slot index using the cell numerology: outcome.sf_idx is a subframe index (0-9),
+    // so scale by slots-per-subframe (1 for SCS-15, 2 for SCS-30, ...).
+    slot_cfg.idx =
+        outcome.sfn * SRSRAN_NSLOTS_PER_FRAME_NR(scs) + outcome.sf_idx * SRSRAN_NSLOTS_PER_SF_NR(scs);
   }
 
   // Set RF timestamp

@@ -61,6 +61,10 @@ bool sync_sa::init(const args_t& args, stack_interface_phy_nr* stack_, srsran::r
   // Compute subframe size
   slot_sz = (uint32_t)(args.srate_hz / 1000.0f);
 
+  // Default to one slot per subframe (SCS-15); refined per cell numerology in cell_select_run()
+  slots_per_subframe = 1;
+  slot_len           = slot_sz;
+
   // Allocate receive buffer
   rx_buffer = srsran_vec_cf_malloc(2 * slot_sz);
   if (rx_buffer == nullptr) {
@@ -189,6 +193,15 @@ rrc_interface_phy_nr::cell_select_result_t sync_sa::cell_select_run(const phy_in
   logger.info("Tuning Tx channel %d to %.2f MHz", 0, req.carrier.ul_center_frequency_hz / 1e6);
   radio->set_tx_freq(0, req.carrier.ul_center_frequency_hz);
 
+  // Derive the cell numerology (slots per subframe). SCS-15 -> 1 slot/subframe (1ms),
+  // SCS-30 -> 2 slots/subframe (0.5ms each). The SSB tracker still works per 1ms subframe,
+  // but the data-plane workers must be dispatched per slot.
+  slots_per_subframe = SRSRAN_NSLOTS_PER_SF_NR(req.carrier.scs);
+  slot_len           = slot_sz / slots_per_subframe;
+  // Absolute slot index space for this numerology: nslots_per_frame * 1024 SFN. For SCS-15 this is
+  // 10240 (matching TTI_ADD); for SCS-30 it is 20480, so the SFN derived from the slot index is correct.
+  nof_slots_hyperframe = SRSRAN_NSLOTS_PER_FRAME_NR(req.carrier.scs) * 1024;
+
   // Configure cell
   srsran_ue_sync_nr_cfg_t cfg = {};
   cfg.N_id                    = req.carrier.pci;
@@ -276,7 +289,7 @@ void sync_sa::run_state_sfn_sync()
     tti = slot_synchronizer.get_slot_cfg().idx;
 
     logger.info("SYNC: SFN synchronised successfully (SFN=%d). Transitioning to IDLE...",
-                tti / SRSRAN_NSLOTS_PER_FRAME_NR(srsran_subcarrier_spacing_15kHz));
+                tti / (slots_per_subframe * SRSRAN_NOF_SF_X_FRAME));
 
     phy_state.state_exit(true);
     return;
@@ -295,39 +308,67 @@ void sync_sa::run_state_sfn_sync()
 
 void sync_sa::run_state_cell_camping()
 {
-  nr::sf_worker* nr_worker = workers.wait_worker(tti);
-  if (nr_worker == nullptr) {
+  // The SSB tracker receives and tracks one full subframe (slot_sz = 1 ms) at a time. For SCS-15
+  // a subframe is one slot; for SCS-30 it is two slots. We receive the whole subframe into the
+  // first worker's buffer, then dispatch one worker per slot with the correct absolute slot index.
+  nr::sf_worker* rx_worker = workers.wait_worker(tti);
+  if (rx_worker == nullptr) {
     running = false;
     return;
   }
 
-  // Receive samples
+  // Receive a whole subframe and track the SSB (CFO-corrected in place into rx_worker's buffer)
   srsran::rf_buffer_t rf_buffer = {};
   rf_buffer.set_nof_samples(slot_sz);
-  rf_buffer.set(0, nr_worker->get_buffer(0, 0));
+  rf_buffer.set(0, rx_worker->get_buffer(0, 0));
   if (not slot_synchronizer.run_camping(rf_buffer, last_rx_time)) {
     logger.error("SYNC: detected out-of-sync... skipping slot ...");
     is_pending_tx_end = true;
-    nr_worker->release();
+    rx_worker->release();
     return;
   }
 
-  srsran::phy_common_interface::worker_context_t context;
-  context.sf_idx     = tti;
-  context.worker_ptr = nr_worker;
-  context.last       = true; // Set last if standalone
-  last_rx_time.add(FDD_HARQ_DELAY_DL_MS * 1e-3);
-  context.tx_time.copy(last_rx_time);
-  // Apply current TA
-  context.tx_time.sub((double)ta.get_sec());
+  // Dispatch one worker per slot contained in the received subframe
+  for (uint32_t slot = 0; slot < slots_per_subframe; slot++) {
+    nr::sf_worker* nr_worker = nullptr;
+    if (slot == 0) {
+      // First slot is already at offset 0 of the receive worker's buffer
+      nr_worker = rx_worker;
+    } else {
+      nr_worker = workers.wait_worker(tti);
+      if (nr_worker == nullptr) {
+        running = false;
+        return;
+      }
+      // Copy this slot's slice from the receive buffer into the new worker's buffer
+      srsran_vec_cf_copy(
+          nr_worker->get_buffer(0, 0), rx_worker->get_buffer(0, 0) + slot * slot_len, slot_len);
+    }
 
-  nr_worker->set_context(context);
+    srsran::phy_common_interface::worker_context_t context;
+    context.sf_idx     = tti;
+    context.worker_ptr = nr_worker;
+    context.last       = true; // Set last if standalone
 
-  // NR worker needs to be launched first, phy_common::worker_end expects first the NR worker and the LTE worker.
-  tti_semaphore.push(nr_worker);
-  workers.start_worker(nr_worker);
+    // Receive time of this slot and the corresponding transmit time
+    srsran::rf_timestamp_t slot_tx_time = {};
+    slot_tx_time.copy(last_rx_time);
+    slot_tx_time.add((double)(slot * slot_len) / srate_hz);
+    slot_tx_time.add(FDD_HARQ_DELAY_DL_MS * 1e-3);
+    // Apply current TA
+    slot_tx_time.sub((double)ta.get_sec());
+    context.tx_time.copy(slot_tx_time);
 
-  tti = TTI_ADD(tti, 1);
+    nr_worker->set_context(context);
+
+    // NR worker needs to be launched first, phy_common::worker_end expects first the NR worker and the LTE worker.
+    tti_semaphore.push(nr_worker);
+    workers.start_worker(nr_worker);
+
+    // Advance the absolute slot index within the numerology-aware hyperframe (SCS-15: mod 10240,
+    // SCS-30: mod 20480) so the SFN derived downstream (idx / nslots_per_frame) stays correct.
+    tti = (tti + 1) % nof_slots_hyperframe;
+  }
 }
 
 void sync_sa::run_thread()

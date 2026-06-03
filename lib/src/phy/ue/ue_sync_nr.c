@@ -165,18 +165,60 @@ static int ue_sync_nr_run_find(srsran_ue_sync_nr_t* q, cf_t* buffer)
   srsran_csi_trs_measurements_t measurements = {};
   srsran_pbch_msg_nr_t          pbch_msg     = {};
 
-  // Find SSB, measure PSS/SSS and decode PBCH
-  if (srsran_ssb_find(&q->ssb, buffer, q->N_id, &measurements, &pbch_msg) < SRSRAN_SUCCESS) {
-    ERROR("Error finding SSB");
-    return SRSRAN_ERROR;
+  // A free-running radio (e.g. bladeRF/M2SDR) can present a carrier offset beyond srsran_ssb_find's
+  // internal CFO range, which makes (re)acquisition during SFN-sync intermittently fail. Sweep a few
+  // coarse CFO candidates and keep the first that decodes the PBCH. The applied offset is folded back
+  // into the measured CFO so the tracker locks the true value. Bounded (few candidates, early return)
+  // so the per-subframe FIND cost stays real-time during acquisition.
+  const float subc_hz = (float)SRSRAN_SUBC_SPACING_NR(q->ssb.cfg.scs);
+  const int   step_hz = (int)(subc_hz / 2.0f);
+  const int   max_hz  = (int)subc_hz; // candidates: 0, +/-SCS/2, +/-SCS
+  cf_t*       tmp     = NULL;
+
+  for (int mag = 0; mag <= max_hz; mag += (step_hz > 0 ? step_hz : max_hz + 1)) {
+    for (int sign = (mag == 0 ? 0 : -1); sign <= 1; sign += 2) {
+      int         cfo_hz = sign * mag;
+      const cf_t* ptr    = buffer;
+      if (cfo_hz != 0) {
+        if (tmp == NULL) {
+          tmp = srsran_vec_cf_malloc(q->sf_sz);
+          if (tmp == NULL) {
+            continue;
+          }
+        }
+        srsran_vec_apply_cfo(buffer, -(float)cfo_hz / (float)q->srate_hz, tmp, (int)q->sf_sz);
+        ptr = tmp;
+      }
+
+      SRSRAN_MEM_ZERO(&measurements, srsran_csi_trs_measurements_t, 1);
+      SRSRAN_MEM_ZERO(&pbch_msg, srsran_pbch_msg_nr_t, 1);
+
+      // Find SSB, measure PSS/SSS and decode PBCH
+      if (srsran_ssb_find(&q->ssb, ptr, q->N_id, &measurements, &pbch_msg) < SRSRAN_SUCCESS) {
+        if (tmp != NULL) {
+          free(tmp);
+        }
+        ERROR("Error finding SSB");
+        return SRSRAN_ERROR;
+      }
+
+      if (pbch_msg.crc) {
+        // Fold the applied coarse CFO into the measured CFO so the tracker locks the true offset
+        measurements.cfo_hz += (float)cfo_hz;
+        if (tmp != NULL) {
+          free(tmp);
+        }
+        return ue_sync_nr_update_ssb(q, &measurements, &pbch_msg);
+      }
+    }
   }
 
-  // If the PBCH message was NOT decoded, early return
-  if (!pbch_msg.crc) {
-    return SRSRAN_SUCCESS;
+  if (tmp != NULL) {
+    free(tmp);
   }
 
-  return ue_sync_nr_update_ssb(q, &measurements, &pbch_msg);
+  // No PBCH decoded at any candidate offset
+  return SRSRAN_SUCCESS;
 }
 
 static int ue_sync_nr_run_track(srsran_ue_sync_nr_t* q, cf_t* buffer)
@@ -204,12 +246,21 @@ static int ue_sync_nr_run_track(srsran_ue_sync_nr_t* q, cf_t* buffer)
     return SRSRAN_ERROR;
   }
 
-  // If the PBCH message was NOT decoded, transition to find
+  // If the PBCH message was NOT decoded, tolerate a few consecutive misses
+  // before declaring out-of-sync (3GPP-style N310). Dropping to FIND on a
+  // single transient miss is too fragile and also breaks when the actual SSB
+  // periodicity is longer than the assumed monitoring period (e.g. TDD/SCS-30).
   if (!pbch_msg.crc) {
-    q->state = SRSRAN_UE_SYNC_NR_STATE_FIND;
+    q->pbch_miss_count++;
+    if (q->pbch_miss_count >= 20) {
+      q->state           = SRSRAN_UE_SYNC_NR_STATE_FIND;
+      q->pbch_miss_count = 0;
+    }
+    // Keep the free-running subframe/SFN counters; stay in TRACK through the miss.
     return SRSRAN_SUCCESS;
   }
 
+  q->pbch_miss_count = 0;
   return ue_sync_nr_update_ssb(q, &measurements, &pbch_msg);
 }
 

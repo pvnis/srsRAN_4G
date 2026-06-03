@@ -174,7 +174,7 @@ int srsran_ue_dl_nr_set_carrier(srsran_ue_dl_nr_t* q, const srsran_carrier_nr_t*
       cfg.cp                    = SRSRAN_CP_NORM;
       cfg.keep_dc               = true;
       cfg.rx_window_offset      = UE_DL_NR_FFT_WINDOW_OFFSET;
-      cfg.phase_compensation_hz = carrier->dl_center_frequency_hz;
+      cfg.phase_compensation_hz = getenv("SRSUE_NO_PHASE_COMP") ? 0.0 : carrier->dl_center_frequency_hz;
 
       srsran_ofdm_rx_init_cfg(&q->fft[i], &cfg);
     }

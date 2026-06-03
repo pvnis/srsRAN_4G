@@ -315,9 +315,12 @@ float srsran_symbol_distance_s(uint32_t l0, uint32_t l1, srsran_subcarrier_spaci
 
 static bool tdd_nr_is_dl(const srsran_tdd_config_nr_t* cfg, uint32_t numerology, uint32_t slot_idx)
 {
-  // Prevent zero division
+  // No TDD pattern configured yet (period 0). This happens before SIB1 provides the
+  // TDD-UL-DL-ConfigCommon: the UE must still be able to receive the SSB / Type0-PDCCH (SIB1),
+  // which are transmitted in DL. Treat all slots as DL until the real pattern is known; once it
+  // is configured the normal DL/UL boundary check below applies.
   if (cfg->pattern1.period_ms == 0 && cfg->pattern2.period_ms == 0) {
-    return false;
+    return true;
   }
 
   // Calculate slot index within the TDD overall period
@@ -618,6 +621,26 @@ static const coreset_zero_entry_t coreset_zero_30_15[16] = {
     {},
 };
 
+// TS 38.213 Table 13-4: {SS/PBCH block, PDCCH} SCS {30, 30} kHz, minimum channel bandwidth 5 MHz or 10 MHz.
+static const coreset_zero_entry_t coreset_zero_30_30[16] = {
+    {1, 24, 2, 0},
+    {1, 24, 2, 1},
+    {1, 24, 2, 2},
+    {1, 24, 2, 3},
+    {1, 24, 2, 4},
+    {1, 24, 3, 0},
+    {1, 24, 3, 1},
+    {1, 24, 3, 2},
+    {1, 24, 3, 3},
+    {1, 24, 3, 4},
+    {1, 48, 1, 12},
+    {1, 48, 1, 14},
+    {1, 48, 1, 16},
+    {1, 48, 2, 12},
+    {1, 48, 2, 14},
+    {1, 48, 2, 16},
+};
+
 int srsran_coreset_to_str(srsran_coreset_t* coreset, char* str, uint32_t str_len)
 {
   if (coreset == NULL || str == NULL || str_len == 0) {
@@ -690,6 +713,12 @@ int srsran_coreset_zero(uint32_t                    n_cell_id,
   // bandwidth 5 MHz or 10 MHz
   if (ssb_scs == srsran_subcarrier_spacing_30kHz && pdcch_scs == srsran_subcarrier_spacing_15kHz) {
     entry = &coreset_zero_30_15[idx];
+  }
+
+  // Table 13-4: {SS/PBCH block, PDCCH} SCS is {30, 30} kHz for frequency bands with minimum channel
+  // bandwidth 5 MHz or 10 MHz
+  if (ssb_scs == srsran_subcarrier_spacing_30kHz && pdcch_scs == srsran_subcarrier_spacing_30kHz) {
+    entry = &coreset_zero_30_30[idx];
   }
 
   // Check a valid entry has been selected
@@ -771,6 +800,12 @@ int srsran_coreset0_ssb_offset(uint32_t idx, srsran_subcarrier_spacing_t ssb_scs
   // bandwidth 5 MHz or 10 MHz
   if (ssb_scs == srsran_subcarrier_spacing_30kHz && pdcch_scs == srsran_subcarrier_spacing_15kHz) {
     entry = &coreset_zero_30_15[idx];
+  }
+
+  // Table 13-4: {SS/PBCH block, PDCCH} SCS is {30, 30} kHz for frequency bands with minimum channel
+  // bandwidth 5 MHz or 10 MHz
+  if (ssb_scs == srsran_subcarrier_spacing_30kHz && pdcch_scs == srsran_subcarrier_spacing_30kHz) {
+    entry = &coreset_zero_30_30[idx];
   }
 
   // Check a valid entry has been selected

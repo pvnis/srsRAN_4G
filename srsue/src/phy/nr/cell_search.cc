@@ -91,6 +91,17 @@ cell_search::ret_t cell_search::run_slot(const cf_t* buffer, uint32_t slot_sz)
     ret.result = ret_t::CELL_FOUND;
   } else {
     ret.result = ret_t::CELL_NOT_FOUND;
+    // DIAGNOSTIC: log SSB candidates that were found but rejected, so we can
+    // tell a PSS/SNR miss (snr very low) from a PBCH-decode miss (snr ok,
+    // crc=0). Only log real candidates to avoid flooding on empty slots.
+    if (ret.ssb_res.measurements.snr_dB > -12.0f) {
+      logger.warning("SSB candidate REJECTED: N_id=%d snr=%.1f dB cfo=%.0f Hz rsrp=%.1f dB "
+                     "epre=%.1f dB t_off=%d pbch_crc=%d",
+                     ret.ssb_res.N_id, ret.ssb_res.measurements.snr_dB,
+                     ret.ssb_res.measurements.cfo_hz, ret.ssb_res.measurements.rsrp_dB,
+                     ret.ssb_res.measurements.epre_dB, ret.ssb_res.t_offset,
+                     (int)ret.ssb_res.pbch_msg.crc);
+    }
   }
   return ret;
 }

@@ -436,7 +436,8 @@ rrc_nr::cell_selection_proc::handle_cell_search_result(const rrc_interface_phy_n
     Error("Cell barred");
     return proc_outcome_t::error;
   }
-  if (mib.scs_common != srsran_subcarrier_spacing_15kHz) {
+  if (mib.scs_common != srsran_subcarrier_spacing_15kHz &&
+      mib.scs_common != srsran_subcarrier_spacing_30kHz) {
     Error("Unsupported SCS %s", srsran_subcarrier_spacing_to_str(mib.scs_common));
     return proc_outcome_t::error;
   }

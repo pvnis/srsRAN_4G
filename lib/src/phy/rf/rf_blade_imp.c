@@ -20,6 +20,7 @@
  */
 
 #include <libbladeRF.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -135,6 +136,7 @@ int rf_blade_start_rx_stream(void* h, UNUSED bool now)
     return status;
   }
   handler->rx_stream_enabled = true;
+  rf_blade_flush_buffer(h);
   return 0;
 }
 
@@ -156,7 +158,31 @@ int rf_blade_stop_rx_stream(void* h)
   return 0;
 }
 
-void rf_blade_flush_buffer(UNUSED void* h) {}
+void rf_blade_flush_buffer(void* h)
+{
+  rf_blade_handler_t* handler = (rf_blade_handler_t*)h;
+
+  if (handler == NULL || !handler->rx_stream_enabled) {
+    return;
+  }
+
+  int16_t                   dummy[4096 * 2];
+  struct bladerf_metadata   meta;
+  static const unsigned int max_flush_reads = 64;
+
+  for (unsigned int i = 0; i < max_flush_reads; i++) {
+    memset(&meta, 0, sizeof(meta));
+    meta.flags = BLADERF_META_FLAG_RX_NOW;
+
+    int status = bladerf_sync_rx(handler->dev, dummy, 4096, &meta, 0);
+    if (status == BLADERF_ERR_TIMEOUT) {
+      break;
+    }
+    if (status != 0) {
+      break;
+    }
+  }
+}
 
 bool rf_blade_has_rssi(UNUSED void* h)
 {
@@ -361,10 +387,29 @@ srsran_rf_info_t* rf_blade_get_info(void* h)
   return info;
 }
 
+/* Optional UE-side oscillator calibration: SRSUE_BLADE_PPM applies a
+ * multiplicative clock-ratio correction to every RX/TX tune so the bladeRF's
+ * effective frequency matches a gNB whose reference is offset by N ppm. This
+ * lets srsUE acquire (CFO ~0) and then track the gNB's residual drift. */
+static double rf_blade_freq_ppm(void)
+{
+  static int    inited = 0;
+  static double ppm    = 0.0;
+  if (!inited) {
+    const char* e = getenv("SRSUE_BLADE_PPM");
+    if (e != NULL) {
+      ppm = atof(e);
+    }
+    inited = 1;
+    printf("rf_blade: freq correction = %.4f ppm\n", ppm);
+  }
+  return ppm;
+}
+
 double rf_blade_set_rx_freq(void* h, UNUSED uint32_t ch, double freq)
 {
   rf_blade_handler_t* handler = (rf_blade_handler_t*)h;
-  bladerf_frequency   f_int   = (uint32_t)round(freq);
+  bladerf_frequency   f_int   = (bladerf_frequency)round(freq * (1.0 + rf_blade_freq_ppm() * 1e-6));
   int                 status  = bladerf_set_frequency(handler->dev, BLADERF_RX_X1, f_int);
   if (status != 0) {
     ERROR("Failed to set samplerate = %u: %s", (uint32_t)freq, bladerf_strerror(status));
@@ -373,6 +418,7 @@ double rf_blade_set_rx_freq(void* h, UNUSED uint32_t ch, double freq)
   f_int = 0;
   bladerf_get_frequency(handler->dev, BLADERF_RX_X1, &f_int);
   printf("set RX frequency to %lu\n", f_int);
+  rf_blade_flush_buffer(h);
 
   return freq;
 }
@@ -380,7 +426,7 @@ double rf_blade_set_rx_freq(void* h, UNUSED uint32_t ch, double freq)
 double rf_blade_set_tx_freq(void* h, UNUSED uint32_t ch, double freq)
 {
   rf_blade_handler_t* handler = (rf_blade_handler_t*)h;
-  bladerf_frequency   f_int   = (uint32_t)round(freq);
+  bladerf_frequency   f_int   = (bladerf_frequency)round(freq * (1.0 + rf_blade_freq_ppm() * 1e-6));
   int                 status  = bladerf_set_frequency(handler->dev, BLADERF_TX_X1, f_int);
   if (status != 0) {
     ERROR("Failed to set samplerate = %u: %s", (uint32_t)freq, bladerf_strerror(status));

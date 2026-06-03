@@ -157,6 +157,34 @@ void cc_worker::decode_pdcch_dl()
     return;
   }
 
+  // INSTRUMENT (SIB1 debug): report the SI-RNTI (Type0-PDCCH) search in the SSB/SIB1 slots of each
+  // frame (slots 0-3; SCS-30 has 20 slots/frame), plus any slot where energy or a DCI is seen.
+  if (rnti.type == srsran_rnti_type_si) {
+    uint32_t sif      = dl_slot_cfg.idx % 20;
+    float    max_epre = -200.0f;
+    float    max_corr = 0.0f;
+    for (uint32_t k = 0; k < ue_dl.pdcch_info_count; k++) {
+      if (ue_dl.pdcch_info[k].measure.epre_dBfs > max_epre) {
+        max_epre = ue_dl.pdcch_info[k].measure.epre_dBfs;
+      }
+      if (ue_dl.pdcch_info[k].measure.norm_corr > max_corr) {
+        max_corr = ue_dl.pdcch_info[k].measure.norm_corr;
+      }
+    }
+    if (sif <= 3 || n_dl > 0 || max_epre > -120.0f) {
+      srsran_coreset_t* cs = &ue_dl.cfg.coreset[0];
+      logger.warning("SIB1-DBG slot=%u sif=%u n_dl=%d cs0[dur=%u start_rb=%u] cand=%u max_epre=%.1f max_corr=%.2f",
+                     dl_slot_cfg.idx,
+                     sif,
+                     n_dl,
+                     cs->duration,
+                     srsran_coreset_start_rb(cs),
+                     ue_dl.pdcch_info_count,
+                     max_epre,
+                     max_corr);
+    }
+  }
+
   // Iterate over all received grants
   for (int i = 0; i < n_dl; i++) {
     // Log found DCI
