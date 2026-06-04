@@ -30,7 +30,7 @@
  * @note Increases protection against inter-symbol interference in case of synchronization error in expense of computing
  * performance
  */
-#define UE_DL_NR_FFT_WINDOW_OFFSET 0.5f
+#define UE_DL_NR_FFT_WINDOW_OFFSET (getenv("SRSUE_FFT_WOFF") ? (float)atof(getenv("SRSUE_FFT_WOFF")) : 0.5f)
 
 static int ue_dl_nr_alloc_prb(srsran_ue_dl_nr_t* q, uint32_t new_nof_prb)
 {
@@ -166,7 +166,7 @@ int srsran_ue_dl_nr_set_carrier(srsran_ue_dl_nr_t* q, const srsran_carrier_nr_t*
     return SRSRAN_ERROR;
   }
 
-  if (carrier->nof_prb != q->carrier.nof_prb) {
+  if (carrier->nof_prb != q->carrier.nof_prb || carrier->scs != q->carrier.scs) {
     for (uint32_t i = 0; i < q->nof_rx_antennas; i++) {
       srsran_ofdm_cfg_t cfg     = {};
       cfg.nof_prb               = carrier->nof_prb;
@@ -175,7 +175,7 @@ int srsran_ue_dl_nr_set_carrier(srsran_ue_dl_nr_t* q, const srsran_carrier_nr_t*
       cfg.keep_dc               = true;
       cfg.rx_window_offset      = UE_DL_NR_FFT_WINDOW_OFFSET;
       cfg.phase_compensation_hz = getenv("SRSUE_NO_PHASE_COMP") ? 0.0 : carrier->dl_center_frequency_hz;
-
+      cfg.nr_scs_hz             = SRSRAN_SUBC_SPACING_NR(carrier->scs); // NR slot CP layout (mu >= 1 fix)
       srsran_ofdm_rx_init_cfg(&q->fft[i], &cfg);
     }
   }

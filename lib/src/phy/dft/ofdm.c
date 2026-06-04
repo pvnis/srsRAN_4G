@@ -57,6 +57,7 @@ static int ofdm_init_mbsfn_(srsran_ofdm_t* q, srsran_ofdm_cfg_t* cfg, srsran_dft
     q->cfg.cp        = cfg->cp;
     q->cfg.nof_prb   = cfg->nof_prb;
     q->cfg.symbol_sz = cfg->symbol_sz;
+    q->cfg.nr_scs_hz = cfg->nr_scs_hz; // NR slot CP layout selector must survive a resize re-init
   } else {
     // Otherwise copy all parameters
     q->cfg = *cfg;
@@ -167,6 +168,15 @@ static int ofdm_init_mbsfn_(srsran_ofdm_t* q, srsran_ofdm_cfg_t* cfg, srsran_dft
     srsran_vec_cf_zero(in_buffer, q->sf_sz);
   }
 
+  // NR numerology mu >= 1 (SCS > 15 kHz): the 14-symbol slot has a long CP only at symbol 0. The legacy LTE layout
+  // inserts a second long CP at symbol 7 (the start of the second 7-symbol half), shifting symbols 7..13 by
+  // (cp1 - cp2) samples and corrupting any channel that spans symbol 7 (e.g. SIB1 PDSCH). For NR mu >= 1 advance the
+  // second half by the uniform normal-CP stride instead of the long-CP slot size so the CP layout stays continuous.
+  int slot_advance = (int)q->slot_sz;
+  if (q->cfg.nr_scs_hz > 15000) {
+    slot_advance = SRSRAN_CP_NSYMB(cp) * (symbol_sz + cp2);
+  }
+
   for (int slot = 0; slot < SRSRAN_NOF_SLOTS_PER_SF; slot++) {
     // If Guru DFT was allocated, free
     if (q->fft_plan_sf[slot].size) {
@@ -178,7 +188,7 @@ static int ofdm_init_mbsfn_(srsran_ofdm_t* q, srsran_ofdm_cfg_t* cfg, srsran_dft
       if (srsran_dft_plan_guru_c(&q->fft_plan_sf[slot],
                                  symbol_sz,
                                  dir,
-                                 in_buffer + cp1 + q->slot_sz * slot - q->window_offset_n,
+                                 in_buffer + cp1 + slot_advance * slot - q->window_offset_n,
                                  q->tmp,
                                  1,
                                  1,
@@ -193,7 +203,7 @@ static int ofdm_init_mbsfn_(srsran_ofdm_t* q, srsran_ofdm_cfg_t* cfg, srsran_dft
                                  symbol_sz,
                                  dir,
                                  q->tmp,
-                                 out_buffer + cp1 + q->slot_sz * slot,
+                                 out_buffer + cp1 + slot_advance * slot,
                                  1,
                                  1,
                                  SRSRAN_CP_NSYMB(cp),
@@ -376,7 +386,7 @@ int srsran_ofdm_set_phase_compensation(srsran_ofdm_t* q, double center_freq_hz)
 
   // Extract modulation required parameters
   uint32_t symbol_sz = q->cfg.symbol_sz;
-  double   scs       = 15e3; //< Assume 15kHz subcarrier spacing
+  double   scs       = (q->cfg.nr_scs_hz > 0) ? (double)q->cfg.nr_scs_hz : 15e3; //< Default 15kHz subcarrier spacing
   double   srate_hz  = symbol_sz * scs;
 
   // Assert parameters
@@ -387,8 +397,11 @@ int srsran_ofdm_set_phase_compensation(srsran_ofdm_t* q, double center_freq_hz)
   // Otherwise calculate the phase
   uint32_t count = 0;
   for (uint32_t l = 0; l < q->nof_symbols * SRSRAN_NOF_SLOTS_PER_SF; l++) {
+    // For NR numerology mu >= 1 the long CP only appears at symbol 0 of the 14-symbol slot (index l), not at the
+    // second 7-symbol boundary (l % nof_symbols) which is the legacy LTE/SCS-15 layout.
+    uint32_t cp_idx = (q->cfg.nr_scs_hz > 15000) ? l : (l % q->nof_symbols);
     uint32_t cp_len =
-        SRSRAN_CP_ISNORM(q->cfg.cp) ? SRSRAN_CP_LEN_NORM(l % q->nof_symbols, symbol_sz) : SRSRAN_CP_LEN_EXT(symbol_sz);
+        SRSRAN_CP_ISNORM(q->cfg.cp) ? SRSRAN_CP_LEN_NORM(cp_idx, symbol_sz) : SRSRAN_CP_LEN_EXT(symbol_sz);
 
     // Advance CP
     count += cp_len;
@@ -620,7 +633,12 @@ static void ofdm_tx_slot(srsran_ofdm_t* q, int slot_in_sf)
   srsran_dft_run_guru_c(&q->fft_plan_sf[slot_in_sf]);
 
   for (int i = 0; i < nof_symbols; i++) {
-    int cp_len = SRSRAN_CP_ISNORM(cp) ? SRSRAN_CP_LEN_NORM(i, symbol_sz) : SRSRAN_CP_LEN_EXT(symbol_sz);
+    // NR mu>=1: the long CP only sits at symbol 0 of the 14-symbol slot. Using the per-7-symbol index puts a second
+    // long CP at symbol 7 (LTE layout), mis-placing symbols 7..13 of the UL TX and stepping their phase at the
+    // half-slot boundary (gNB sees ~75 deg DMRS phase jump between sym 2 and sym 7/11 -> Msg3 snr ~0 dB). Use the
+    // continuous slot symbol index for the CP length so symbol 7 gets a normal CP.
+    uint32_t cp_idx = (q->cfg.nr_scs_hz > 15000) ? (slot_in_sf * nof_symbols + (uint32_t)i) : (uint32_t)i;
+    int cp_len = SRSRAN_CP_ISNORM(cp) ? SRSRAN_CP_LEN_NORM(cp_idx, symbol_sz) : SRSRAN_CP_LEN_EXT(symbol_sz);
 
     if (isnormal(q->cfg.phase_compensation_hz)) {
       // Get phase compensation

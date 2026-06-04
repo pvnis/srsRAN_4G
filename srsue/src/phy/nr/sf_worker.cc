@@ -96,6 +96,13 @@ void sf_worker::work_imp()
 
   // Check if PRACH is available
   if (prach_ptr != nullptr) {
+    if (getenv("SRSUE_PRACH_TX_DBG")) {
+      uint32_t mi  = srsran_vec_max_abs_ci(prach_ptr, sf_len);
+      cf_t     v   = prach_ptr[mi];
+      float    mx  = sqrtf(__real__ v * __real__ v + __imag__ v * __imag__ v);
+      double   txs = context.tx_time.get(0).full_secs + context.tx_time.get(0).frac_secs;
+      fprintf(stderr, "PRACH-TX max_abs=%.4f sf_len=%u tx_time=%.6f sf_idx=%u\n", mx, sf_len, txs, context.sf_idx);
+    }
     // PRACH is available, set buffer, transmit and return
     tx_buffer.set(phy_state.args.rf_channel_offset, prach_ptr);
     tx_buffer.set_nof_samples(sf_len);
@@ -119,6 +126,17 @@ void sf_worker::work_imp()
     tx_buffer.set(i + phy_state.args.rf_channel_offset, cc_workers[i]->get_tx_buffer(0));
   }
   tx_buffer.set_nof_samples(sf_len);
+
+  if (getenv("SRSUE_UL_TX_DBG")) {
+    cf_t*    b   = cc_workers[0]->get_tx_buffer(0);
+    uint32_t mi  = srsran_vec_max_abs_ci(b, sf_len);
+    cf_t     v   = b[mi];
+    float    mx  = sqrtf(__real__ v * __real__ v + __imag__ v * __imag__ v);
+    if (mx > 1e-4f) {
+      double txs = context.tx_time.get(0).full_secs + context.tx_time.get(0).frac_secs;
+      fprintf(stderr, "UL-TX max_abs=%.4f sf_idx=%u tx_time=%.6f\n", mx, context.sf_idx, txs);
+    }
+  }
 
   // Always call worker_end before returning
   common.worker_end(context, true, tx_buffer);

@@ -821,9 +821,31 @@ int srsran_dmrs_sch_estimate(srsran_dmrs_sch_t*           q,
   sync_err /= (float)nof_symbols;
   float delay_us = sync_err / (dmrs_stride * SRSRAN_SUBC_SPACING_NR(q->carrier.scs));
 
+  // INSTRUMENT: dump raw DMRS pilot ramp + sync_err to diagnose PDSCH timing ramp (env-gated).
+  {
+    const char* dpath = getenv("SRSUE_DUMP_PDSCH_D");
+    if (dpath != NULL) {
+      FILE* fpil = fopen(dpath, "a");
+      if (fpil != NULL) {
+        fprintf(fpil, "DMRS sync_err=%.4f delay_us=%.4f npil=%d nsym=%d sf_symbols=%p\n",
+                sync_err, delay_us, nof_pilots_x_symbol, nof_symbols, (void*)sf_symbols);
+        for (uint32_t s = 0; s < nof_symbols; s++) {
+          fprintf(fpil, "  rawpil sym_l=%u phase[0,2,4,6,8,10]:", symbols[s]);
+          for (int k = 0; k < 12 && k < (int)nof_pilots_x_symbol; k += 2) {
+            cf_t v = q->pilot_estimates[nof_pilots_x_symbol * s + k];
+            float ph = atan2f(__imag__ v, __real__ v) * 180.0f / (float)M_PI;
+            fprintf(fpil, " %.0f", ph);
+          }
+          fprintf(fpil, "\n");
+        }
+        fclose(fpil);
+      }
+    }
+  }
+
 #if DMRS_SCH_SYNC_PRECOMPENSATE
   // Pre-compensate synchronization error
-  if (isnormal(sync_err)) {
+  if (isnormal(sync_err) && !getenv("SRSUE_NO_SYNC_PRECOMP")) {
     for (uint32_t i = 0; i < nof_symbols; i++) {
       srsran_vec_apply_cfo(&q->pilot_estimates[nof_pilots_x_symbol * i],
                            sync_err,
@@ -922,11 +944,23 @@ int srsran_dmrs_sch_estimate(srsran_dmrs_sch_t*           q,
     srsran_vec_sc_prod_cfc(q->pilot_estimates, 1.0f / (float)nof_symbols, q->pilot_estimates, nof_pilots_x_symbol);
   }
 
+  // INSTRUMENT: pilot phases after time-average, BEFORE smoothing (env-gated).
+  if (getenv("SRSUE_DUMP_PDSCH_D")) {
+    FILE* fp = fopen(getenv("SRSUE_DUMP_PDSCH_D"), "a");
+    if (fp) { fprintf(fp, "PIL preSmooth[0..7]:");
+      for (int k=0;k<8&&k<(int)nof_pilots_x_symbol;k++){ float ph=atan2f(__imag__ q->pilot_estimates[k],__real__ q->pilot_estimates[k])*180.0f/(float)M_PI; fprintf(fp," %.0f",ph);} fprintf(fp,"\n"); fclose(fp);} }
+
 #if DMRS_SCH_SMOOTH_FILTER_LEN
   // Apply smoothing filter
   srsran_conv_same_cf(
       q->pilot_estimates, q->filter, q->pilot_estimates, nof_pilots_x_symbol, DMRS_SCH_SMOOTH_FILTER_LEN);
 #endif // DMRS_SCH_SMOOTH_FILTER_LEN
+
+  // INSTRUMENT: pilot phases after smoothing, BEFORE interpolation (env-gated).
+  if (getenv("SRSUE_DUMP_PDSCH_D")) {
+    FILE* fp = fopen(getenv("SRSUE_DUMP_PDSCH_D"), "a");
+    if (fp) { fprintf(fp, "PIL postSmooth[0..7]:");
+      for (int k=0;k<8&&k<(int)nof_pilots_x_symbol;k++){ float ph=atan2f(__imag__ q->pilot_estimates[k],__real__ q->pilot_estimates[k])*180.0f/(float)M_PI; fprintf(fp," %.0f",ph);} fprintf(fp,"\n"); fclose(fp);} }
 
   // Frequency domain interpolate
   uint32_t nof_re_x_symbol =
@@ -954,7 +988,7 @@ int srsran_dmrs_sch_estimate(srsran_dmrs_sch_t*           q,
 
 #if DMRS_SCH_SYNC_PRECOMPENSATE
   // Remove synchronization error pre-compensation
-  if (isnormal(sync_err)) {
+  if (isnormal(sync_err) && !getenv("SRSUE_NO_SYNC_PRECOMP")) {
     srsran_vec_apply_cfo(ce, -sync_err / dmrs_stride, ce, nof_re_x_symbol);
   }
 #endif // DMRS_SCH_SYNC_ERROR_PRECOMPENSATE
@@ -999,6 +1033,24 @@ int srsran_dmrs_sch_estimate(srsran_dmrs_sch_t*           q,
   }
   // Set other values in the estimation result
   chest_res->nof_re = count;
+
+  // INSTRUMENT: dump the channel-estimate phase across the first 12 data REs (env-gated).
+  // If ce ramps while raw pilots are flat, the sync_err pre/re-comp is not cancelling.
+  {
+    const char* dpath = getenv("SRSUE_DUMP_PDSCH_D");
+    if (dpath != NULL && count >= 12) {
+      FILE* fce = fopen(dpath, "a");
+      if (fce != NULL) {
+        fprintf(fce, "CE phase[0..11]:");
+        for (int k = 0; k < 12; k++) {
+          float ph = atan2f(__imag__ chest_res->ce[0][0][k], __real__ chest_res->ce[0][0][k]) * 180.0f / (float)M_PI;
+          fprintf(fce, " %.0f", ph);
+        }
+        fprintf(fce, "\n");
+        fclose(fce);
+      }
+    }
+  }
 
   return SRSRAN_SUCCESS;
 }

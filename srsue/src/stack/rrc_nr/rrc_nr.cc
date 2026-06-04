@@ -491,6 +491,15 @@ void rrc_nr::handle_sib1(const sib1_s& sib1)
     return;
   }
 
+  // Apply TDD Config Common. Without this phy_cfg.duplex stays unconfigured (period_ms=0), so
+  // srsran_duplex_nr_is_ul() returns false for every slot and the UE never transmits any *scheduled* UL
+  // (Msg3/PUSCH/PUCCH) — only PRACH, which bypasses the duplex check via the PRACH occasion.
+  if (sib1.serving_cell_cfg_common.tdd_ul_dl_cfg_common_present) {
+    if (not make_phy_tdd_cfg(sib1.serving_cell_cfg_common.tdd_ul_dl_cfg_common, &phy_cfg.duplex)) {
+      logger.warning("Could not set TDD config.");
+    }
+  }
+
   // Apply PDCCH Config Common
   fill_phy_pdcch_cfg_common(sib1.serving_cell_cfg_common.dl_cfg_common.init_dl_bwp.pdcch_cfg_common.setup(),
                             &phy_cfg.pdcch);
@@ -1512,9 +1521,10 @@ bool rrc_nr::apply_ul_common_cfg(const asn1::rrc_nr::ul_cfg_common_s& ul_cfg_com
   srsran::srsran_band_helper bands;
 
   if (ul_cfg_common.freq_info_ul_present && ul_cfg_common.freq_info_ul.absolute_freq_point_a_present) {
-    // Update UL frequency point if provided
+    // Update UL frequency point if provided. Pass the carrier SCS so the RB width (and hence the carrier centre used
+    // for UL phase compensation) is correct for SCS-30 — see get_center_freq_from_abs_freq_point_a.
     phy_cfg.carrier.ul_center_frequency_hz = bands.get_center_freq_from_abs_freq_point_a(
-        phy_cfg.carrier.nof_prb, ul_cfg_common.freq_info_ul.absolute_freq_point_a);
+        phy_cfg.carrier.nof_prb, ul_cfg_common.freq_info_ul.absolute_freq_point_a, phy_cfg.carrier.scs);
   }
   if (ul_cfg_common.init_ul_bwp_present) {
     if (ul_cfg_common.init_ul_bwp.rach_cfg_common_present) {

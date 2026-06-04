@@ -463,6 +463,31 @@ static inline int pdsch_nr_decode_codeword(srsran_pdsch_nr_t*         q,
         srsran_evm_run_b(q->evm_buffer, &q->modem_tables[tb->mod], q->d[tb->cw_idx], llr, tb->nof_bits);
   }
 
+  // INSTRUMENT: when EVM is high, dump the equalized PDSCH symbols so we can see the failure mode
+  // (rotating constellation = phase/CFO; scattered = RE de-mapping). Env-gated, appends to a file.
+  if (q->evm_buffer != NULL && res->evm[tb->cw_idx] > 0.2f) {
+    const char* dpath = getenv("SRSUE_DUMP_PDSCH_D");
+    if (dpath != NULL) {
+      FILE* fdump = fopen(dpath, "a");
+      if (fdump != NULL) {
+        // Per-symbol intra-symbol ramp: print phase of sc 0..5 for each 120-RE data-symbol block.
+        fprintf(fdump, "evm=%.3f nof_re=%d mod=%d persym_phase(sc0..5):\n", res->evm[tb->cw_idx], tb->nof_re, (int)tb->mod);
+        int re_per_sym = 120; // 10 PRB * 12
+        for (int s = 0; s * re_per_sym < (int)tb->nof_re; s++) {
+          fprintf(fdump, "  sym%d:", s);
+          for (int k = 0; k < 6; k++) {
+            int idx = s * re_per_sym + k;
+            if (idx >= (int)tb->nof_re) break;
+            float ph = atan2f(__imag__ q->d[tb->cw_idx][idx], __real__ q->d[tb->cw_idx][idx]) * 180.0f / (float)M_PI;
+            fprintf(fdump, " %.0f", ph);
+          }
+          fprintf(fdump, "\n");
+        }
+        fclose(fdump);
+      }
+    }
+  }
+
   // Change LLR sign and set to zero the LLR that are not used
   srsran_vec_neg_bb(llr, llr, tb->nof_bits);
 

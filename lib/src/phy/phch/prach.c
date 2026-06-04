@@ -129,20 +129,43 @@ bool srsran_prach_tti_opportunity(srsran_prach_t* p, uint32_t current_tti, int a
   }
 
   uint32_t config_idx = p->config_idx;
-  if (p->tdd_config.configured) {
-    if (p->is_nr) {
-      return srsran_prach_nr_tti_opportunity_fr1_unpaired(p->config_idx, current_tti);
-    } else {
-      return srsran_prach_tti_opportunity_config_tdd(
-          config_idx, p->tdd_config.sf_config, current_tti, &p->current_prach_idx);
+
+  // NR: current_tti is slot-indexed but the PRACH occasion tables (subframe_number) are subframe-indexed.
+  // Convert using the numerology (mu): 2^mu slots per subframe. For SCS-15 (mu=0) this is a no-op, so the
+  // existing FDD/SCS-15 behaviour is preserved. Long preamble formats start at the first slot of the PRACH
+  // subframe, so only fire on slot 0 of the subframe; the multi-slot preamble is then spread across the
+  // following consecutive slot-workers by the caller's prach_nof_sf chunking.
+  if (p->is_nr) {
+    uint32_t                 slots_per_sf = 1u << p->mu;
+    uint32_t                 slot_in_sf   = current_tti % slots_per_sf;
+    uint32_t                 sf_tti       = current_tti / slots_per_sf;
+    const prach_nr_config_t* nrcfg = p->tdd_config.configured ? srsran_prach_nr_get_cfg_fr1_unpaired(config_idx)
+                                                              : srsran_prach_nr_get_cfg_fr1_paired(config_idx);
+    // Which slot(s) within the 15kHz subframe carry the PRACH? Long formats (nof_prach_slots_within_subframe==0)
+    // start at slot 0. Short formats place the PRACH in the LAST nof_prach_slots_within_subframe slots of the
+    // subframe (TS 38.211 5.3.2); e.g. 1 PRACH slot at SCS-30 -> slot 1 (the second/odd slot).
+    if (nrcfg != NULL && SRSRAN_PRACH_NR_FORMAT_IS_SHORT(nrcfg->preamble_format) &&
+        nrcfg->nof_prach_slots_within_subframe > 0) {
+      uint32_t first_prach_slot =
+          (slots_per_sf > nrcfg->nof_prach_slots_within_subframe) ? slots_per_sf - nrcfg->nof_prach_slots_within_subframe
+                                                                  : 0;
+      if (slot_in_sf < first_prach_slot) {
+        return false;
+      }
+    } else if (slot_in_sf != 0) {
+      return false;
     }
-  } else {
-    if (p->is_nr) {
-      return srsran_prach_nr_tti_opportunity_fr1_paired(p->config_idx, current_tti);
-    } else {
-      return srsran_prach_tti_opportunity_config_fdd(config_idx, current_tti, allowed_subframe);
+    if (p->tdd_config.configured) {
+      return srsran_prach_nr_tti_opportunity_fr1_unpaired(config_idx, sf_tti);
     }
+    return srsran_prach_nr_tti_opportunity_fr1_paired(config_idx, sf_tti);
   }
+
+  if (p->tdd_config.configured) {
+    return srsran_prach_tti_opportunity_config_tdd(
+        config_idx, p->tdd_config.sf_config, current_tti, &p->current_prach_idx);
+  }
+  return srsran_prach_tti_opportunity_config_fdd(config_idx, current_tti, allowed_subframe);
 }
 
 bool srsran_prach_tti_opportunity_config_fdd(uint32_t config_idx, uint32_t current_tti, int allowed_subframe)
@@ -361,7 +384,18 @@ const prach_nr_config_t* srsran_prach_nr_get_cfg_fr1_unpaired(uint32_t config_id
     return &prach_nr_cfg_fr1_unpaired[config_idx];
   }
 
-  ERROR("Invalid configuration index %d", config_idx);
+  // NR short-format FR1 unpaired configs (TS 38.211 Table 6.3.3.2-3). Only the entries currently needed are filled in.
+  // Fields: {preamble_format, x, y, {subframe_number}, nof_subframe_number, starting_symbol,
+  //          nof_prach_slots_within_subframe, nof_occasions_within_slot, duration}
+  static const prach_nr_config_t cfg_159 = {SRSRAN_PRACH_NR_FORMAT_B4, 1, 0, {9}, 1, 0, 1, 1, 12};
+  switch (config_idx) {
+    case 159:
+      return &cfg_159;
+    default:
+      break;
+  }
+
+  ERROR("Invalid/unsupported configuration index %d", config_idx);
   return NULL;
 }
 
@@ -465,7 +499,7 @@ int srsran_prach_gen_seqs(srsran_prach_t* p)
   for (int i = 0; i < N_SEQS; i++) {
     if (v > v_max) {
       // Get a new root sequence
-      if (4 == p->f) {
+      if (4 == p->f || SRSRAN_PRACH_NR_FORMAT_IS_SHORT(p->f)) {
         u = prach_zc_roots_format4[(p->rsi + p->N_roots) % 138];
       } else {
         u = prach_zc_roots[(p->rsi + p->N_roots) % 838];
@@ -622,7 +656,12 @@ int srsran_prach_set_cell_(srsran_prach_t*      p,
                            srsran_tdd_config_t* tdd_config)
 {
   int ret = SRSRAN_ERROR;
-  if (p != NULL && N_ifft_ul < 2049 && cfg->config_idx < 64 && cfg->root_seq_idx < MAX_ROOTS) {
+  // NR config indices go up to 255 (short formats); LTE up to 63.
+  uint32_t max_config_idx = cfg->is_nr ? 256 : 64;
+  if (p != NULL && N_ifft_ul < 2049 && cfg->config_idx < max_config_idx && cfg->root_seq_idx < MAX_ROOTS) {
+    // NR numerology mu>=1: the UL/PRACH sample rate is 2^mu the SCS-15 reference. Scale the working IFFT size so the
+    // preamble is generated at the carrier's sample rate (otherwise it is half-duration / double-SCS and undetectable).
+    N_ifft_ul = N_ifft_ul << cfg->mu;
     if (N_ifft_ul > p->max_N_ifft_ul) {
       ERROR("PRACH: Error in set_cell(): N_ifft_ul (%d) must be lower or equal max_N_ifft_ul (%d) in init()",
             N_ifft_ul,
@@ -630,8 +669,21 @@ int srsran_prach_set_cell_(srsran_prach_t*      p,
       return -1;
     }
 
-    uint32_t preamble_format   = srsran_prach_get_preamble_format(cfg->config_idx);
+    // Determine preamble format: for NR use the config table (TS 38.211 6.3.3.2), else the legacy config_idx/16.
+    uint32_t                 preamble_format = srsran_prach_get_preamble_format(cfg->config_idx);
+    const prach_nr_config_t* nrcfg           = NULL;
+    if (cfg->is_nr) {
+      nrcfg = (tdd_config && tdd_config->configured) ? srsran_prach_nr_get_cfg_fr1_unpaired(cfg->config_idx)
+                                                     : srsran_prach_nr_get_cfg_fr1_paired(cfg->config_idx);
+      if (nrcfg == NULL) {
+        ERROR("PRACH: unsupported NR config index %d", cfg->config_idx);
+        return SRSRAN_ERROR;
+      }
+      preamble_format = nrcfg->preamble_format;
+    }
     p->is_nr                   = cfg->is_nr;
+    p->mu                      = cfg->mu;
+    p->carrier_nof_prb         = cfg->carrier_nof_prb;
     p->config_idx              = cfg->config_idx;
     p->f                       = preamble_format;
     p->rsi                     = cfg->root_seq_idx;
@@ -651,7 +703,12 @@ int srsran_prach_set_cell_(srsran_prach_t*      p,
     }
 
     // Determine N_zc and N_cs
-    if (4 == preamble_format) {
+    if (cfg->is_nr && SRSRAN_PRACH_NR_FORMAT_IS_SHORT(preamble_format)) {
+      // NR short preamble formats (A1..C2): L_RA = 139. N_cs from TS 38.211 Table 6.3.3.1-5 (unrestricted set).
+      static const uint32_t prach_Ncs_nr_short[16] = {0, 2, 4, 6, 8, 10, 12, 13, 15, 17, 19, 23, 27, 34, 46, 69};
+      p->N_zc = SRSRAN_PRACH_N_ZC_SHORT;
+      p->N_cs = (p->zczc < 16) ? prach_Ncs_nr_short[p->zczc] : 0;
+    } else if (4 == preamble_format) {
       if (p->zczc < 7) {
         p->N_zc = SRSRAN_PRACH_N_ZC_SHORT;
         p->N_cs = prach_Ncs_format4[p->zczc];
@@ -697,8 +754,35 @@ int srsran_prach_set_cell_(srsran_prach_t*      p,
     }
 
     // Create our FFT objects and buffers
-    p->N_ifft_ul = N_ifft_ul;
-    if (4 == preamble_format) {
+    p->N_ifft_ul   = N_ifft_ul;
+    p->delta_f_ra  = 0;
+    p->prach_nof_sym = 0;
+    if (cfg->is_nr && SRSRAN_PRACH_NR_FORMAT_IS_SHORT(preamble_format)) {
+      // NR short formats: PRACH SCS = msg1 SCS = data SCS = 15kHz << mu_RA (mu_RA == cfg->mu here). The preamble is
+      // N_u repeated OFDM symbols of the PRACH-SCS IFFT, with a format-specific CP (TS 38.211 Table 6.3.3.1-2,
+      // N_CP given in units of kappa = T_s). DELTA_F/delta_f_ra <= 1, so multiply N_ifft_ul before dividing.
+      uint32_t mu_ra  = cfg->mu;
+      p->delta_f_ra   = DELTA_F << mu_ra; // 30000 for mu=1
+      p->N_ifft_prach = p->N_ifft_ul * DELTA_F / p->delta_f_ra; // = N_ifft_ul >> mu_ra
+      // CP length in kappa (= T_s) for each short format, scaled by 1/2^mu_RA.
+      uint32_t cp_kappa = 0;
+      switch (preamble_format) {
+        case SRSRAN_PRACH_NR_FORMAT_A1: cp_kappa = 288; break;
+        case SRSRAN_PRACH_NR_FORMAT_A2: cp_kappa = 576; break;
+        case SRSRAN_PRACH_NR_FORMAT_A3: cp_kappa = 864; break;
+        case SRSRAN_PRACH_NR_FORMAT_B1: cp_kappa = 216; break;
+        case SRSRAN_PRACH_NR_FORMAT_B4: cp_kappa = 936; break;
+        case SRSRAN_PRACH_NR_FORMAT_C0: cp_kappa = 1240; break;
+        case SRSRAN_PRACH_NR_FORMAT_C2: cp_kappa = 2048; break;
+        default: cp_kappa = 936; break;
+      }
+      p->prach_nof_sym = (nrcfg != NULL && nrcfg->duration > 0) ? nrcfg->duration : 1;
+      // N_seq = N_u symbols of the PRACH IFFT; N_cp from kappa (= T_s), scaled to samples like the legacy path.
+      p->N_seq = p->prach_nof_sym * p->N_ifft_prach;
+      p->N_cp  = (cp_kappa >> mu_ra) * p->N_ifft_ul / 2048;
+      p->T_seq = (float)(p->prach_nof_sym * (2048 >> mu_ra)) * SRSRAN_LTE_TS;
+      p->T_tot = p->T_seq + (float)(cp_kappa >> mu_ra) * SRSRAN_LTE_TS;
+    } else if (4 == preamble_format) {
       p->N_ifft_prach = p->N_ifft_ul * DELTA_F / DELTA_F_RA_4;
     } else {
       p->N_ifft_prach = p->N_ifft_ul * DELTA_F / DELTA_F_RA;
@@ -723,10 +807,14 @@ int srsran_prach_set_cell_(srsran_prach_t*      p,
       return -1;
     }
 
-    p->N_seq = prach_Tseq[p->f] * p->N_ifft_ul / 2048;
-    p->N_cp  = prach_Tcp[p->f] * p->N_ifft_ul / 2048;
-    p->T_seq = prach_Tseq[p->f] * SRSRAN_LTE_TS;
-    p->T_tot = (prach_Tseq[p->f] + prach_Tcp[p->f]) * SRSRAN_LTE_TS;
+    // Long/LTE formats use the prach_Tseq/Tcp tables (indexed by the format 0..4). NR short formats already set
+    // N_seq/N_cp/T_seq/T_tot above (format code is out of range for these tables).
+    if (!(cfg->is_nr && SRSRAN_PRACH_NR_FORMAT_IS_SHORT(preamble_format))) {
+      p->N_seq = prach_Tseq[p->f] * p->N_ifft_ul / 2048;
+      p->N_cp  = prach_Tcp[p->f] * p->N_ifft_ul / 2048;
+      p->T_seq = prach_Tseq[p->f] * SRSRAN_LTE_TS;
+      p->T_tot = (prach_Tseq[p->f] + prach_Tcp[p->f]) * SRSRAN_LTE_TS;
+    }
 
     if (p->successive_cancellation) {
       for (int i = 0; i < 64; i++) {
@@ -752,13 +840,37 @@ int srsran_prach_gen(srsran_prach_t* p, uint32_t seq_index, uint32_t freq_offset
   if (p != NULL && seq_index < N_SEQS && signal != NULL) {
     // Calculate parameters
     uint32_t N_rb_ul = srsran_nof_prb(p->N_ifft_ul);
-    uint32_t k_0     = freq_offset * N_RB_SC - N_rb_ul * N_RB_SC / 2 + p->N_ifft_ul / 2;
-    uint32_t K       = DELTA_F / DELTA_F_RA;
-    uint32_t begin   = PHI + (K * k_0) + (p->is_nr ? 0 : (K / 2));
+    uint32_t begin;
+    if (p->is_nr && SRSRAN_PRACH_NR_FORMAT_IS_SHORT(p->f)) {
+      // NR short formats: PRACH SCS == carrier SCS, so the N_ifft_prach grid IS the carrier subcarrier grid. The
+      // L_RA=139 sequence occupies ceil(139/12)=12 PUSCH RBs starting at PUSCH RB freq_offset, centred with
+      // k_bar=(12*12-139)/2=2. begin is the absolute subcarrier of the first sequence tone.
+      uint32_t k_bar  = (12 * N_RB_SC - SRSRAN_PRACH_N_ZC_SHORT) / 2; // = 2
+      begin           = p->N_ifft_prach / 2 - (p->carrier_nof_prb * N_RB_SC) / 2 + freq_offset * N_RB_SC + k_bar;
+      // Even-N IFFT DC-centering: with the mirror IFFT (bin N/2 = DC) and an even N_ifft_prach, the carrier's lowest
+      // subcarrier sits one bin higher than the symmetric "-carrier/2" term implies. Empirically verified against the
+      // srsRAN Project (OCUDU) gNB B4 detector: a 1-subcarrier begin error shifts the ZC correlation peak by ~u
+      // samples (out of the detection window). begin-1 collapses the peak to delay 0 (seq=0 metric 0.03 -> 41).
+      begin -= 1;
+      char* boff = getenv("SRSUE_PRACH_BEGIN_OFF");
+      if (boff) { begin = (uint32_t)((int)begin + atoi(boff)); }
+    } else {
+      uint32_t k_0;
+      if (p->is_nr && p->mu > 0) {
+        // NR numerology mu>=1 long format: an NR PUSCH RB spans (N_RB_SC << mu) subcarriers of the (15 kHz) PRACH IFFT
+        // grid, and the carrier is carrier_nof_prb NR RBs wide centred in N_ifft_ul.
+        uint32_t rb_sc = N_RB_SC << p->mu;
+        k_0            = freq_offset * rb_sc - (p->carrier_nof_prb * rb_sc) / 2 + p->N_ifft_ul / 2;
+      } else {
+        k_0 = freq_offset * N_RB_SC - N_rb_ul * N_RB_SC / 2 + p->N_ifft_ul / 2;
+      }
+      uint32_t K = DELTA_F / DELTA_F_RA;
+      begin      = PHI + (K * k_0) + (p->is_nr ? 0 : (K / 2));
 
-    if (6 + freq_offset > N_rb_ul) {
-      ERROR("Error no space for PRACH: frequency offset=%d, N_rb_ul=%d", freq_offset, N_rb_ul);
-      return ret;
+      if (!(p->is_nr && p->mu > 0) && 6 + freq_offset > N_rb_ul) {
+        ERROR("Error no space for PRACH: frequency offset=%d, N_rb_ul=%d", freq_offset, N_rb_ul);
+        return ret;
+      }
     }
 
     DEBUG(

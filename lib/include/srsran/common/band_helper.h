@@ -110,9 +110,12 @@ public:
    *
    * @param nof_prb Carrier bandwidth in number of RB
    * @param freq_point_a_arfcn Absolute Point A frequency ARFCN
+   * @param carrier_scs Carrier subcarrier spacing (RB width = 12*scs). Default 15 kHz for legacy callers.
    * @return double Frequency in Hz
    */
-  double get_center_freq_from_abs_freq_point_a(uint32_t nof_prb, uint32_t freq_point_a_arfcn);
+  double get_center_freq_from_abs_freq_point_a(uint32_t                    nof_prb,
+                                               uint32_t                    freq_point_a_arfcn,
+                                               srsran_subcarrier_spacing_t carrier_scs = srsran_subcarrier_spacing_15kHz);
 
   /**
    * @brief Compute the absolute pointA for a NR carrier from its bandwidth and the center frequency

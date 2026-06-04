@@ -446,6 +446,11 @@ srsran_prach_tdd_loc_table_t prach_tdd_loc_table[64][7] = {
 
 #define PRACH_NR_CFG_FR1_UNPAIRED_NOF_CFG 28
 
+// These long-format tables leave the trailing short-format fields (nof_prach_slots_within_subframe,
+// nof_occasions_within_slot, duration) zero-initialised on purpose.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+
 // Table 6.3.3.2-3: Random access configurations for FR1 and unpaired spectrum.
 static const prach_nr_config_t prach_nr_cfg_fr1_unpaired[PRACH_NR_CFG_FR1_UNPAIRED_NOF_CFG] = {
     {0, 16, 1, {9}, 1, 0},         {0, 8, 1, {9}, 1, 0},
@@ -481,3 +486,4 @@ static const prach_nr_config_t prach_nr_cfg_fr1_paired[PRACH_NR_CFG_FR1_PAIRED_N
     {0, 1, 0, {1, 4, 7}, 3, 0},       {0, 1, 0, {2, 5, 8}, 3, 0},
     {0, 1, 0, {3, 6, 9}, 3, 0},       {0, 1, 0, {0, 2, 4, 6, 8}, 5, 0},
     {0, 1, 0, {1, 3, 5, 7, 9}, 5, 0}, {0, 1, 0, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, 10, 0}};
+#pragma GCC diagnostic pop

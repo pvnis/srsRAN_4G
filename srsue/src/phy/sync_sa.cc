@@ -198,6 +198,7 @@ rrc_interface_phy_nr::cell_select_result_t sync_sa::cell_select_run(const phy_in
   // but the data-plane workers must be dispatched per slot.
   slots_per_subframe = SRSRAN_NSLOTS_PER_SF_NR(req.carrier.scs);
   slot_len           = slot_sz / slots_per_subframe;
+  ta.set_numerology(req.carrier.scs); // RAR/MAC TA commands scale as 1/2^mu
   // Absolute slot index space for this numerology: nslots_per_frame * 1024 SFN. For SCS-15 this is
   // 10240 (matching TTI_ADD); for SCS-30 it is 20480, so the SFN derived from the slot index is correct.
   nof_slots_hyperframe = SRSRAN_NSLOTS_PER_FRAME_NR(req.carrier.scs) * 1024;
@@ -354,10 +355,23 @@ void sync_sa::run_state_cell_camping()
     srsran::rf_timestamp_t slot_tx_time = {};
     slot_tx_time.copy(last_rx_time);
     slot_tx_time.add((double)(slot * slot_len) / srate_hz);
-    slot_tx_time.add(FDD_HARQ_DELAY_DL_MS * 1e-3);
+    // The DL->UL TX advance is FDD_HARQ_DELAY_DL_MS *slots* (TTI_TX adds it in slot units), not milliseconds.
+    // At SCS-15 one slot == 1 ms so this equals the legacy 4 ms; at SCS-30 it must be 4 slots = 2 ms, otherwise the
+    // PRACH/UL lands FDD_HARQ_DELAY_DL_MS*(2^mu - 1) slots past the gNB's RX window (PRACH rssi=-inf).
+    slot_tx_time.add((double)FDD_HARQ_DELAY_DL_MS * (double)slot_len / srate_hz);
+    if (const char* a = getenv("SRSUE_UL_ADV_US")) {
+      slot_tx_time.add(atof(a) * 1e-6); // diagnostic: extra UL advance in microseconds
+    }
     // Apply current TA
     slot_tx_time.sub((double)ta.get_sec());
     context.tx_time.copy(slot_tx_time);
+
+    if (getenv("SRSUE_TXT_DBG") && (tti % (slots_per_subframe * 10) == 18 || tti % (slots_per_subframe * 10) == 14)) {
+      fprintf(stderr, "TXT tti=%u slot=%u rx=%.6f slot_len=%u srate=%.0f adv=%.6f ta=%.6f -> tx=%.6f\n",
+              tti, slot, last_rx_time.get(0).full_secs + last_rx_time.get(0).frac_secs, slot_len, srate_hz,
+              FDD_HARQ_DELAY_DL_MS * (double)slot_len / srate_hz, ta.get_sec(),
+              slot_tx_time.get(0).full_secs + slot_tx_time.get(0).frac_secs);
+    }
 
     nr_worker->set_context(context);
 

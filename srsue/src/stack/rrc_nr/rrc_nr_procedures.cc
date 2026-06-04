@@ -453,6 +453,10 @@ rrc_nr::cell_selection_proc::handle_cell_search_result(const rrc_interface_phy_n
   srsran::phy_cfg_nr_t& phy_cfg = rrc_handle.phy_cfg;
   phy_cfg.pdsch.typeA_pos       = mib.dmrs_typeA_pos;
   phy_cfg.pdsch.scs_cfg         = mib.scs_common;
+  // PUSCH numerology must also follow the common SCS; otherwise the Msg3 RAR-grant slot delay Δ (TS 38.214
+  // Table 6.1.2.1.1-5: Δ=2/3/4/6 for μ=0/1/2/3) defaults to the SCS-15 value (2) and Msg3 lands one slot early
+  // (e.g. on the TDD special slot) instead of the intended UL slot.
+  phy_cfg.pusch.scs_cfg         = mib.scs_common;
   phy_cfg.carrier.pci           = result.pci;
 
   // Get pointA and SSB absolute frequencies

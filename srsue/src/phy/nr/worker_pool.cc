@@ -127,9 +127,12 @@ sf_worker* worker_pool::wait_worker(uint32_t tti)
       scs        = cfg.carrier.scs;
     }
 
-    // Notify MAC about PRACH transmission
-    phy_state.stack->prach_sent(
-        TTI_TX(tti), srsran_prach_nr_start_symbol(config_idx, mode), SRSRAN_SLOT_NR_MOD(scs, TTI_TX(tti)), 0, 0);
+    // Notify MAC about PRACH transmission. RA-RNTI t_id (TS 38.321 5.1.3) is the index of the first slot of the PRACH
+    // occasion in the system frame, at the PRACH SCS (0..slots_per_frame). For NR short-format occasions (one per
+    // slot) this is the full slot-in-frame index. Verified against the srsRAN Project (OCUDU) gNB: SCS-30 slot 19 ->
+    // t_id=19 -> RA-RNTI = 1 + 14*19 = 267 = 0x10b. (An earlier >>mu shift produced 0x7f and the UE missed the RAR.)
+    uint32_t t_id = SRSRAN_SLOT_NR_MOD(scs, TTI_TX(tti));
+    phy_state.stack->prach_sent(TTI_TX(tti), srsran_prach_nr_start_symbol(config_idx, mode), t_id, 0, 0);
   }
 
   // Set PRACH transmission buffer in workers if it is pending
@@ -267,6 +270,9 @@ bool worker_pool::set_config(const srsran::phy_cfg_nr_t& new_cfg)
 
   // Best effort to set up NR-PRACH config reused for NR
   srsran_prach_cfg_t prach_cfg           = new_cfg.prach;
+  prach_cfg.is_nr                        = true;
+  prach_cfg.mu                           = (uint32_t)new_cfg.carrier.scs; // slot-indexed tti -> PRACH subframes
+  prach_cfg.carrier_nof_prb              = new_cfg.carrier.nof_prb;       // for mu>=1 PRACH frequency placement
   uint32_t           lte_nr_prach_offset = (new_cfg.carrier.nof_prb - cell.nof_prb) / 2;
   if (prach_cfg.freq_offset < lte_nr_prach_offset) {
     logger.error("prach_cfg.freq_offset=%d is not compatible with LTE", prach_cfg.freq_offset);

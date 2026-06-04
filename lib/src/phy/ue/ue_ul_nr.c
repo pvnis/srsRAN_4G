@@ -81,7 +81,12 @@ int srsran_ue_ul_nr_set_carrier(srsran_ue_ul_nr_t* q, const srsran_carrier_nr_t*
   fft_cfg.nof_prb               = carrier->nof_prb;
   fft_cfg.symbol_sz             = srsran_min_symbol_sz_rb(carrier->nof_prb);
   fft_cfg.keep_dc               = true;
-  fft_cfg.phase_compensation_hz = carrier->ul_center_frequency_hz;
+  fft_cfg.phase_compensation_hz = getenv("SRSUE_NO_UL_PHASECOMP") ? 0.0 : carrier->ul_center_frequency_hz;
+  // SCS-aware CP layout (mu>=1): without this the UL TX OFDM modulator uses the LTE/SCS-15 layout (long CP at
+  // symbol 0 AND 7), mis-placing symbols 7-13 of the slot and corrupting PUSCH symbol timing + phase compensation.
+  // This is the transmit-side counterpart of the SIB1-PDSCH RX fix (ue_dl_nr.c). Without it Msg3 decodes at
+  // snr=-10 dB with a spurious ~1.6 kHz CFO; with it the DMRS channel estimate is clean.
+  fft_cfg.nr_scs_hz             = SRSRAN_SUBC_SPACING_NR(carrier->scs);
   if (srsran_ofdm_tx_init_cfg(&q->ifft, &fft_cfg) < SRSRAN_SUCCESS) {
     ERROR("Initiating OFDM");
     return SRSRAN_ERROR;

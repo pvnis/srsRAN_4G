@@ -62,6 +62,9 @@ typedef struct SRSRAN_API {
   bool             keep_dc;          ///< If true, it does not remove the DC
   double           phase_compensation_hz; ///< Carrier frequency in Hz for phase compensation, set to 0 to disable
   srsran_cfr_cfg_t cfr_tx_cfg;            ///< Tx CFR configuration
+  uint32_t         nr_scs_hz;        ///< NR subcarrier spacing in Hz (0 = legacy LTE/SCS-15 layout). When > 15000
+                                     ///< (numerology mu >= 1) the 14-symbol NR slot has a long CP only at symbol 0;
+                                     ///< symbols 7..13 continue the normal-CP stride (no spurious long CP at symbol 7).
 } srsran_ofdm_cfg_t;
 
 /**

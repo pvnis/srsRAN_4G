@@ -39,6 +39,7 @@ private:
   mutable std::mutex    mutex;
   uint32_t              next_base_nta = 0;
   float                 next_base_sec = 0.0f;
+  uint32_t              numerology    = 0; ///< NR numerology mu; RAR/new TA command N_TA scales as 1/2^mu
 
   // Vector containing data for calculating speed. The first value is the time increment from TTI and the second value
   // is the distance increment from the TA command
@@ -122,12 +123,21 @@ public:
    *
    * @param ta_cmd Time Alignment command
    */
+  /// Sets the NR numerology mu so RAR/MAC time-alignment commands are scaled by 1/2^mu.
+  void set_numerology(uint32_t mu)
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    numerology = mu;
+  }
+
   void add_ta_cmd_rar(uint32_t tti, uint32_t ta_cmd)
   {
     std::lock_guard<std::mutex> lock(mutex);
 
-    // Update base nta
-    next_base_nta += srsran_N_ta_new_rar(ta_cmd);
+    // Update base nta. The RAR command's N_TA is defined for the SCS-15 reference; for NR numerology mu it scales as
+    // 1/2^mu (TS 38.213 4.2). Scale ONLY the command contribution (the N_TA_offset base, set via add_ta_offset, is
+    // numerology-independent). Without this, at SCS-30 the TA is 2x too large and Msg3/PUSCH is over-advanced.
+    next_base_nta += srsran_N_ta_new_rar(ta_cmd) >> numerology;
 
     // Update base in seconds
     next_base_sec = static_cast<float>(next_base_nta) * SRSRAN_LTE_TS;
@@ -149,8 +159,12 @@ public:
     std::lock_guard<std::mutex> lock(mutex);
     float                       prev_base_sec = next_base_sec;
 
-    // Update base nta
-    next_base_nta = srsran_N_ta_new(next_base_nta, ta_cmd);
+    // Update base nta. Scale only the command delta ((ta_cmd-31)*16) by 1/2^mu, like add_ta_cmd_rar.
+    int32_t delta = ((static_cast<int32_t>(ta_cmd & 63)) - 31) * 16;
+    delta >>= numerology;
+    int32_t new_nta = static_cast<int32_t>(next_base_nta) + delta;
+    new_nta         = new_nta < 0 ? 0 : (new_nta > 20512 ? 20512 : new_nta);
+    next_base_nta   = static_cast<uint32_t>(new_nta);
 
     // Update base in seconds
     next_base_sec = static_cast<float>(next_base_nta) * SRSRAN_LTE_TS;

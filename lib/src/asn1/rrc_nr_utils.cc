@@ -427,6 +427,7 @@ bool make_phy_rach_cfg(const rach_cfg_common_s& asn1_type,
       break;
     case rach_cfg_common_s::prach_root_seq_idx_c_::types_opts::l139:
       prach_cfg->root_seq_idx = (uint32_t)asn1_type.prach_root_seq_idx.l139();
+      break;
     default:
       asn1::log_error("Not-implemented option for prach_root_seq_idx type %s",
                       asn1_type.prach_root_seq_idx.type().to_string());
@@ -1655,7 +1656,9 @@ bool make_phy_carrier_cfg(const freq_info_dl_s& asn1_freq_info_dl, srsran_carrie
   srsran::srsran_band_helper bands;
   out_carrier_nr->ssb_center_freq_hz     = bands.nr_arfcn_to_freq(absolute_frequency_ssb);
   out_carrier_nr->dl_center_frequency_hz = bands.get_center_freq_from_abs_freq_point_a(
-      asn1_freq_info_dl.scs_specific_carrier_list[0].carrier_bw, asn1_freq_info_dl.absolute_freq_point_a);
+      asn1_freq_info_dl.scs_specific_carrier_list[0].carrier_bw,
+      asn1_freq_info_dl.absolute_freq_point_a,
+      make_subcarrier_spacing(asn1_freq_info_dl.scs_specific_carrier_list[0].subcarrier_spacing));
   out_carrier_nr->ul_center_frequency_hz = out_carrier_nr->dl_center_frequency_hz; // needs to be updated for FDD
   out_carrier_nr->offset_to_carrier      = asn1_freq_info_dl.scs_specific_carrier_list[0].offset_to_carrier;
   out_carrier_nr->nof_prb                = asn1_freq_info_dl.scs_specific_carrier_list[0].carrier_bw;
@@ -2133,7 +2136,9 @@ void fill_phy_carrier_cfg(const asn1::rrc_nr::serving_cell_cfg_common_sib_s& ser
   auto&                      freq_info_ul = serv_cell_cfg.ul_cfg_common.freq_info_ul;
   srsran::srsran_band_helper bands;
   out_carrier_nr->ul_center_frequency_hz = bands.get_center_freq_from_abs_freq_point_a(
-      freq_info_ul.scs_specific_carrier_list[0].carrier_bw, freq_info_ul.absolute_freq_point_a);
+      freq_info_ul.scs_specific_carrier_list[0].carrier_bw,
+      freq_info_ul.absolute_freq_point_a,
+      make_subcarrier_spacing(freq_info_ul.scs_specific_carrier_list[0].subcarrier_spacing));
 }
 
 void fill_phy_ssb_cfg(const asn1::rrc_nr::serving_cell_cfg_common_sib_s& serv_cell_cfg,

@@ -63,6 +63,10 @@ typedef struct SRSRAN_API {
   // Parameters from higher layers (extracted from SIB2)
   bool     is_nr;
   uint32_t config_idx;
+  uint32_t mu;             // NR numerology (0=15kHz, 1=30kHz...). Used to map slot-indexed tti to subframes.
+  uint32_t carrier_nof_prb; // NR carrier PRB count (for mu>=1 PRACH frequency placement)
+  uint32_t delta_f_ra;     // PRACH subcarrier spacing in Hz (1250 long; 15000<<mu_RA short). 0 => legacy define.
+  uint32_t prach_nof_sym;  // short format: number of OFDM symbols N_u (repetitions). 0 => long format.
   uint32_t f;            // preamble format
   uint32_t rsi;          // rootSequenceIndex
   bool     hs;           // highSpeedFlag
@@ -132,13 +136,28 @@ typedef struct SRSRAN_API {
 /**
  * @brief PRACH configuration for NR as described in TS 38.211 Tables 6.3.3.2-2, 6.3.3.2-3 and 6.3.3.2-4
  */
+// NR preamble format codes used in prach_nr_config_t.preamble_format. 0-3 are the long formats (839); the short
+// formats (139) use codes >= SRSRAN_PRACH_NR_FORMAT_A1. Restricted only to the ones needed for FR1 unpaired.
+#define SRSRAN_PRACH_NR_FORMAT_0 0
+#define SRSRAN_PRACH_NR_FORMAT_A1 10
+#define SRSRAN_PRACH_NR_FORMAT_A2 11
+#define SRSRAN_PRACH_NR_FORMAT_A3 12
+#define SRSRAN_PRACH_NR_FORMAT_B1 13
+#define SRSRAN_PRACH_NR_FORMAT_B4 14
+#define SRSRAN_PRACH_NR_FORMAT_C0 15
+#define SRSRAN_PRACH_NR_FORMAT_C2 16
+#define SRSRAN_PRACH_NR_FORMAT_IS_SHORT(f) ((f) >= SRSRAN_PRACH_NR_FORMAT_A1)
+
 typedef struct {
   uint32_t preamble_format;
   uint32_t x;
   uint32_t y;
   uint32_t subframe_number[PRACH_NR_CFG_MAX_NOF_SF];
   uint32_t nof_subframe_number;
-  uint32_t starting_symbol; // subframe number
+  uint32_t starting_symbol;                 // first OFDM symbol of the PRACH occasion within the slot
+  uint32_t nof_prach_slots_within_subframe; // short formats: PRACH slots within a 15 kHz subframe (0 = long format)
+  uint32_t nof_occasions_within_slot;       // short formats: time-domain PRACH occasions within a PRACH slot
+  uint32_t duration;                        // short formats: PRACH duration in OFDM symbols (N_u multiplier)
 } prach_nr_config_t;
 
 typedef enum SRSRAN_API {
@@ -148,6 +167,8 @@ typedef enum SRSRAN_API {
 
 typedef struct {
   bool                is_nr; // Set to true if NR
+  uint32_t            mu;    // NR numerology (0=15kHz, 1=30kHz...); maps slot-indexed tti to PRACH subframes
+  uint32_t            carrier_nof_prb; // NR carrier PRB count (for mu>=1 PRACH frequency placement)
   uint32_t            config_idx;
   uint32_t            root_seq_idx;
   uint32_t            zero_corr_zone;

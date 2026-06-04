@@ -135,6 +135,9 @@ public:
     pending_grant.sch_cfg             = pusch_cfg;
     pending_grant.pid                 = dci_ul.pid;
     pending_grant.enable              = true;
+    if (getenv("SRSUE_UL_TX_DBG")) {
+      fprintf(stderr, "SET-UL-GRANT slot_rx=%u k=%u -> tti_tx=%u\n", slot_rx.idx, pusch_cfg.grant.k, tti_tx);
+    }
   }
 
   /**
@@ -154,7 +157,13 @@ public:
 
     // If the entry is not active, just return
     if (!pending_grant.enable) {
+      if (getenv("SRSUE_UL_GRANT_Q") && tti_tx >= 690 && tti_tx <= 705) {
+        fprintf(stderr, "GET-UL-GRANT q tti_tx=%u MISS\n", tti_tx);
+      }
       return false;
+    }
+    if (getenv("SRSUE_UL_TX_DBG") || getenv("SRSUE_UL_GRANT_Q")) {
+      fprintf(stderr, "GET-UL-GRANT q tti_tx=%u HIT\n", tti_tx);
     }
 
     // Load shared channel configuration and PID

@@ -56,7 +56,8 @@ void prach::init(uint32_t max_prb)
     return;
   }
 
-  if (srsran_prach_init(&prach_obj, srsran_symbol_sz(max_prb))) {
+  // Allocate with 2x headroom so an NR numerology mu>=1 PRACH (generated at 2^mu the SCS-15 sample rate) fits.
+  if (srsran_prach_init(&prach_obj, SRSRAN_MIN(2048, srsran_symbol_sz(max_prb) * 2))) {
     Error("Initiating PRACH library");
     return;
   }

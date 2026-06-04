@@ -118,14 +118,16 @@ uint32_t srsran_band_helper::get_ul_arfcn_from_dl_arfcn(uint32_t dl_arfcn) const
   return 0;
 }
 
-double srsran_band_helper::get_center_freq_from_abs_freq_point_a(uint32_t nof_prb, uint32_t freq_point_a_arfcn)
+double srsran_band_helper::get_center_freq_from_abs_freq_point_a(uint32_t                    nof_prb,
+                                                                 uint32_t                    freq_point_a_arfcn,
+                                                                 srsran_subcarrier_spacing_t carrier_scs)
 {
-  // for FR1 unit of resources blocks for freq calc is always 180kHz regardless for actual SCS of carrier
+  // The carrier centre is Point A plus half the carrier bandwidth. The RB width is 12*SCS, so it depends on the
+  // carrier SCS (e.g. 360 kHz at SCS-30, not 180 kHz). Using a fixed 15 kHz here put the SCS-30 UL carrier centre
+  // 4.59 MHz low (for 51 PRB), giving the UL phase-compensation a ~-87 deg/symbol ramp that broke Msg3 PUSCH.
   // TODO: add offset_to_carrier
   double abs_freq_point_a_freq = nr_arfcn_to_freq(freq_point_a_arfcn);
-  return abs_freq_point_a_freq +
-         (1.0 * nof_prb / 2 * SRSRAN_SUBC_SPACING_NR(srsran_subcarrier_spacing_t::srsran_subcarrier_spacing_15kHz) *
-          SRSRAN_NRE);
+  return abs_freq_point_a_freq + (1.0 * nof_prb / 2 * SRSRAN_SUBC_SPACING_NR(carrier_scs) * SRSRAN_NRE);
 }
 
 uint32_t srsran_band_helper::get_abs_freq_point_a_arfcn(uint32_t nof_prb, uint32_t arfcn)

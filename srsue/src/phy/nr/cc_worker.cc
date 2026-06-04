@@ -264,6 +264,21 @@ bool cc_worker::decode_pdsch_dl()
     // Early return if no grant was available
     return true;
   }
+
+  // INSTRUMENT (SIB1 PDSCH debug): dump the DMRS config + grant so we can compare the UE's DMRS
+  // symbol/RE layout against the gNB's for the SI-RNTI PDSCH.
+  if (pdsch_cfg.grant.rnti_type == srsran_rnti_type_si) {
+    std::array<char, 512> dstr = {};
+    srsran_dmrs_sch_cfg_to_str(&pdsch_cfg.dmrs, dstr.data(), (uint32_t)dstr.size());
+    logger.warning("SIB1-PDSCH-DBG slot=%u S=%u L=%u map=%d nof_dmrs_groups=%d dmrs{%s}",
+                   dl_slot_cfg.idx,
+                   pdsch_cfg.grant.S,
+                   pdsch_cfg.grant.L,
+                   (int)pdsch_cfg.grant.mapping,
+                   (int)pdsch_cfg.grant.nof_dmrs_cdm_groups_without_data,
+                   dstr.data());
+  }
+
   // Notify MAC about PDSCH grant
   mac_interface_phy_nr::tb_action_dl_t    dl_action    = {};
   mac_interface_phy_nr::mac_nr_grant_dl_t mac_dl_grant = {};
@@ -593,6 +608,11 @@ bool cc_worker::work_ul()
   srsran_pdsch_ack_nr_t pdsch_ack  = {};
   bool                  has_ul_ack = phy.get_pending_ack(ul_slot_cfg.idx, pdsch_ack);
 
+  if (getenv("SRSUE_UL_GRANT_Q") && ul_slot_cfg.idx >= 690 && ul_slot_cfg.idx <= 705) {
+    fprintf(stderr, "WORK-UL ul_idx=%u is_ul=%d period=%u\n", ul_slot_cfg.idx,
+            (int)srsran_duplex_nr_is_ul(&cfg.duplex, 0, ul_slot_cfg.idx), cfg.duplex.tdd.pattern1.period_ms);
+  }
+
   // Check if it is a UL slot, if not skip
   if (!srsran_duplex_nr_is_ul(&cfg.duplex, 0, ul_slot_cfg.idx)) {
     // No NR signal shall be transmitted
@@ -640,7 +660,12 @@ bool cc_worker::work_ul()
   phy.get_periodic_csi(cfg, ul_slot_cfg, uci_data);
 
   // Setup frequency offset
-  srsran_ue_ul_nr_set_freq_offset(&ue_ul, phy.get_ul_cfo());
+  {
+    const char* ulcfo = getenv("SRSUE_UL_CFO_HZ");
+    float fo = getenv("SRSUE_NO_UL_CFO") ? 0.0f : phy.get_ul_cfo();
+    if (ulcfo) { fo = atof(ulcfo); }
+    srsran_ue_ul_nr_set_freq_offset(&ue_ul, fo);
+  }
 
   if (has_pusch_grant) {
     // Notify MAC about PUSCH found grant
