@@ -296,7 +296,8 @@ static int srsran_dmrs_sch_get_symbols_idx_mapping_type_A_single(const srsran_dm
     symbols[count] = 7;
     count++;
   } else if (ld < 12) {
-    if (dmrs_cfg->additional_pos > srsran_dmrs_sch_add_pos_2) {
+    // TS 38.211 Table 7.4.1.1.2-3, ld = 10 or 11: pos1 gives l0 and 9; pos2 and pos3 give l0, 6 and 9.
+    if (dmrs_cfg->additional_pos >= srsran_dmrs_sch_add_pos_2) {
       symbols[count] = 6;
       count++;
     }
