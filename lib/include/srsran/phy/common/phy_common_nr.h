@@ -470,6 +470,7 @@ typedef struct SRSRAN_API {
  */
 typedef struct SRSRAN_API {
   uint32_t period_ms;      ///< Period in milliseconds, set to 0 if not present
+  bool     period_plus_half_ms; ///< Adds 0.5 ms to period_ms (e.g. ms2p5); needs numerology >= 1
   uint32_t nof_dl_slots;   ///< Number of consecutive full DL slots at the beginning of each DL-UL pattern
   uint32_t nof_dl_symbols; ///< Number of consecutive DL symbols in the beginning of the slot following the last DL slot
   uint32_t nof_ul_slots;   ///< Number of consecutive full UL slots at the end of each DL-UL pattern

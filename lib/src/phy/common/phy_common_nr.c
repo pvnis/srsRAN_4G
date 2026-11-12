@@ -313,6 +313,13 @@ float srsran_symbol_distance_s(uint32_t l0, uint32_t l1, srsran_subcarrier_spaci
   return srsran_symbol_offset_s(l1, scs) - srsran_symbol_offset_s(l0, scs);
 }
 
+
+/* Number of slots of a TDD pattern period for the given numerology. */
+static uint32_t tdd_pattern_nof_slots(const srsran_tdd_pattern_t* pattern, uint32_t slot_x_ms)
+{
+  return pattern->period_ms * slot_x_ms + (pattern->period_plus_half_ms ? slot_x_ms / 2 : 0);
+}
+
 static bool tdd_nr_is_dl(const srsran_tdd_config_nr_t* cfg, uint32_t numerology, uint32_t slot_idx)
 {
   // No TDD pattern configured yet (period 0). This happens before SIB1 provides the
@@ -325,14 +332,14 @@ static bool tdd_nr_is_dl(const srsran_tdd_config_nr_t* cfg, uint32_t numerology,
 
   // Calculate slot index within the TDD overall period
   uint32_t slot_x_ms       = 1U << numerology; // Number of slots per millisecond
-  uint32_t period_sum      = (cfg->pattern1.period_ms + cfg->pattern2.period_ms) * slot_x_ms; // Total perdiod sum
+  uint32_t period_sum      = tdd_pattern_nof_slots(&cfg->pattern1, slot_x_ms) + tdd_pattern_nof_slots(&cfg->pattern2, slot_x_ms); // Total perdiod sum
   uint32_t slot_idx_period = slot_idx % period_sum; // Slot index within the period
 
   // Select pattern
   const srsran_tdd_pattern_t* pattern = &cfg->pattern1;
-  if ((slot_idx_period >= cfg->pattern1.period_ms * slot_x_ms)) {
+  if ((slot_idx_period >= tdd_pattern_nof_slots(&cfg->pattern1, slot_x_ms))) {
     pattern = &cfg->pattern2;
-    slot_idx_period -= cfg->pattern1.period_ms * slot_x_ms; // Remove pattern 1 offset
+    slot_idx_period -= tdd_pattern_nof_slots(&cfg->pattern1, slot_x_ms); // Remove pattern 1 offset
   }
 
   // Check DL boundaries
@@ -365,18 +372,18 @@ static bool tdd_nr_is_ul(const srsran_tdd_config_nr_t* cfg, uint32_t numerology,
 
   // Calculate slot index within the TDD overall period
   uint32_t slot_x_ms       = 1U << numerology; // Number of slots per millisecond
-  uint32_t period_sum      = (cfg->pattern1.period_ms + cfg->pattern2.period_ms) * slot_x_ms; // Total perdiod sum
+  uint32_t period_sum      = tdd_pattern_nof_slots(&cfg->pattern1, slot_x_ms) + tdd_pattern_nof_slots(&cfg->pattern2, slot_x_ms); // Total perdiod sum
   uint32_t slot_idx_period = slot_idx % period_sum; // Slot index within the period
 
   // Select pattern
   const srsran_tdd_pattern_t* pattern = &cfg->pattern1;
-  if ((slot_idx_period >= cfg->pattern1.period_ms * slot_x_ms)) {
+  if ((slot_idx_period >= tdd_pattern_nof_slots(&cfg->pattern1, slot_x_ms))) {
     pattern = &cfg->pattern2;
-    slot_idx_period -= cfg->pattern1.period_ms * slot_x_ms; // Remove pattern 1 offset
+    slot_idx_period -= tdd_pattern_nof_slots(&cfg->pattern1, slot_x_ms); // Remove pattern 1 offset
   }
 
   // Calculate slot in which UL starts
-  uint32_t start_ul = (pattern->period_ms * slot_x_ms - pattern->nof_ul_slots) - 1;
+  uint32_t start_ul = (tdd_pattern_nof_slots(pattern, slot_x_ms) - pattern->nof_ul_slots) - 1;
 
   // Check UL boundaries
   return (slot_idx_period > start_ul || (slot_idx_period == start_ul && pattern->nof_ul_symbols != 0));

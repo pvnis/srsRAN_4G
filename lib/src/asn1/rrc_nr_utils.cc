@@ -495,6 +495,9 @@ bool make_phy_tdd_cfg(const tdd_ul_dl_cfg_common_s& tdd_ul_dl_cfg_common,
     case tdd_ul_dl_pattern_s::dl_ul_tx_periodicity_opts::ms0p5:
     case tdd_ul_dl_pattern_s::dl_ul_tx_periodicity_opts::ms0p625:
     case tdd_ul_dl_pattern_s::dl_ul_tx_periodicity_opts::ms2p5:
+      srsran_duplex_config_nr.tdd.pattern1.period_ms           = 2;
+      srsran_duplex_config_nr.tdd.pattern1.period_plus_half_ms = true;
+      break;
     default:
       asn1::log_warning("Invalid option for dl_ul_tx_periodicity_opts %s",
                         tdd_ul_dl_cfg_common.pattern1.dl_ul_tx_periodicity.to_string());
@@ -524,6 +527,9 @@ bool make_phy_tdd_cfg(const tdd_ul_dl_cfg_common_s& tdd_ul_dl_cfg_common,
       case tdd_ul_dl_pattern_s::dl_ul_tx_periodicity_opts::ms0p5:
       case tdd_ul_dl_pattern_s::dl_ul_tx_periodicity_opts::ms0p625:
       case tdd_ul_dl_pattern_s::dl_ul_tx_periodicity_opts::ms2p5:
+        srsran_duplex_config_nr.tdd.pattern2.period_ms           = 2;
+        srsran_duplex_config_nr.tdd.pattern2.period_plus_half_ms = true;
+        break;
       default:
         asn1::log_warning("Invalid option for pattern2 dl_ul_tx_periodicity_opts %s",
                           tdd_ul_dl_cfg_common.pattern2.dl_ul_tx_periodicity.to_string());
