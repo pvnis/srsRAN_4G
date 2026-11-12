@@ -95,6 +95,7 @@ int main(int argc, char** argv)
   prach_cfg.root_seq_idx     = root_seq_idx;
   prach_cfg.zero_corr_zone   = zero_corr_zone;
   prach_cfg.num_ra_preambles = num_ra_preambles;
+  prach_cfg.tdd_config.configured = is_nr; // NR config indices of the TDD (unpaired) table
 
   if (srsran_prach_init(&prach, srsran_symbol_sz(nof_prb))) {
     return -1;
@@ -118,6 +119,13 @@ int main(int argc, char** argv)
 
   for (seq_index = 0; seq_index < 64; seq_index++) {
     srsran_prach_gen(&prach, seq_index, 0, preamble);
+    if (getenv("PRACH_DUMP") != NULL) { // dump the first preamble (CP plus sequence) and stop
+      FILE* f = fopen(getenv("PRACH_DUMP"), "wb");
+      fwrite(preamble, sizeof(cf_t), prach.N_cp + prach.N_seq, f);
+      fclose(f);
+      printf("dumped %u + %u samples, N_zc=%u, N_ifft_prach=%u, is_nr=%d, format=%u\n", prach.N_cp, prach.N_seq, prach.N_zc, prach.N_ifft_prach, prach.is_nr, prach.f);
+      exit(0);
+    }
 
     uint32_t prach_len = prach.N_seq;
 

@@ -847,11 +847,11 @@ int srsran_prach_gen(srsran_prach_t* p, uint32_t seq_index, uint32_t freq_offset
       // k_bar=(12*12-139)/2=2. begin is the absolute subcarrier of the first sequence tone.
       uint32_t k_bar  = (12 * N_RB_SC - SRSRAN_PRACH_N_ZC_SHORT) / 2; // = 2
       begin           = p->N_ifft_prach / 2 - (p->carrier_nof_prb * N_RB_SC) / 2 + freq_offset * N_RB_SC + k_bar;
-      // Even-N IFFT DC-centering: with the mirror IFFT (bin N/2 = DC) and an even N_ifft_prach, the carrier's lowest
-      // subcarrier sits one bin higher than the symmetric "-carrier/2" term implies. Empirically verified against the
-      // srsRAN Project (OCUDU) gNB B4 detector: a 1-subcarrier begin error shifts the ZC correlation peak by ~u
-      // samples (out of the detection window). begin-1 collapses the peak to delay 0 (seq=0 metric 0.03 -> 41).
-      begin -= 1;
+      // No further offset: k_bar = 2 is TS 38.211 Table 6.3.3.2-1 for L_RA = 139 and the OCUDU detector maps the
+      // preamble the same way. An earlier empirical "begin -= 1" was tuned on root sequence index 1 (physical root
+      // 138), where a one-subcarrier error moves the correlation peak by only one sample; for other roots the peak
+      // moves by the modular inverse of the root (11.5 us for index 4, out of the window for 2, 35 and 103), which
+      // is what made srsUE attach only with root indices 0, 1 and 69.
       char* boff = getenv("SRSUE_PRACH_BEGIN_OFF");
       if (boff) { begin = (uint32_t)((int)begin + atoi(boff)); }
     } else {
