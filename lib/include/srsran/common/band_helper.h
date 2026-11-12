@@ -253,7 +253,7 @@ private:
     uint32_t             F_DL_high; // in MHz
     srsran_duplex_mode_t duplex_mode;
   };
-  static const uint32_t nof_nr_operating_band_fr1                                                  = 32;
+  static const uint32_t nof_nr_operating_band_fr1                                                  = 33;
   static constexpr std::array<nr_operating_band, nof_nr_operating_band_fr1> nr_operating_bands_fr1 = {{
       // clang-format off
     {1,  1920, 1080, 2110, 2170, SRSRAN_DUPLEX_MODE_FDD},
@@ -271,6 +271,7 @@ private:
     {39, 1880, 1920, 1880, 1920, SRSRAN_DUPLEX_MODE_TDD},
     {40, 2300, 2400, 2300, 2400, SRSRAN_DUPLEX_MODE_TDD},
     {41, 2496, 2690, 2496, 2690, SRSRAN_DUPLEX_MODE_TDD},
+    {48, 3550, 3700, 3550, 3700, SRSRAN_DUPLEX_MODE_TDD},
     {50, 1432, 1517, 1432, 1517, SRSRAN_DUPLEX_MODE_TDD},
     {51, 1427, 1432, 1427, 1432, SRSRAN_DUPLEX_MODE_TDD},
     {66, 1710, 1780, 2110, 2200, SRSRAN_DUPLEX_MODE_FDD},
@@ -339,7 +340,7 @@ private:
 
   // List of NR bands for FR1 (Table 5.4.2.3-1)
   // bands with more than one raster offset have multiple entries
-  static const uint32_t nof_nr_bands_fr1                                   = 36;
+  static const uint32_t nof_nr_bands_fr1                                   = 38;
   static constexpr std::array<nr_band, nof_nr_bands_fr1> nr_band_table_fr1 = {{
       // clang-format off
     {1, KHZ_100, 384000, 20, 396000, 422000, 20, 434000},
@@ -365,6 +366,9 @@ private:
 
     {41, KHZ_15, 499200, 3, 537999, 499200, 3, 537999},
     {41, KHZ_30, 499200, 6, 537996, 499200, 6, 537996},
+
+    {48, KHZ_15, 636667, 1, 646666, 636667, 1, 646666},
+    {48, KHZ_30, 636668, 2, 646666, 636668, 2, 646666},
 
     {50, KHZ_100, 286400, 20, 303400, 286400, 20, 303400},
     {51, KHZ_100, 285400, 20, 286400, 285400, 20, 286400},
@@ -419,7 +423,7 @@ private:
     uint32_t                    gscn_step;
     uint32_t                    gscn_last;
   };
-  static const uint32_t nof_nr_band_ss_raster                                                   = 29;
+  static const uint32_t nof_nr_band_ss_raster                                                   = 31;
   static constexpr std::array<nr_band_ss_raster, nof_nr_band_ss_raster> nr_band_ss_raster_table = {{
       {1, srsran_subcarrier_spacing_15kHz, SRSRAN_SSB_PATTERN_A, 5279, 1, 5419},
       {2, srsran_subcarrier_spacing_15kHz, SRSRAN_SSB_PATTERN_A, 4829, 1, 4969},
@@ -438,6 +442,8 @@ private:
       {40, srsran_subcarrier_spacing_15kHz, SRSRAN_SSB_PATTERN_A, 5756, 1, 5995},
       {41, srsran_subcarrier_spacing_15kHz, SRSRAN_SSB_PATTERN_A, 6246, 3, 6717},
       {41, srsran_subcarrier_spacing_30kHz, SRSRAN_SSB_PATTERN_C, 6252, 3, 6714},
+      {48, srsran_subcarrier_spacing_15kHz, SRSRAN_SSB_PATTERN_A, 7884, 1, 7982},
+      {48, srsran_subcarrier_spacing_30kHz, SRSRAN_SSB_PATTERN_C, 7884, 1, 7982},
       {50, srsran_subcarrier_spacing_15kHz, SRSRAN_SSB_PATTERN_A, 3584, 1, 3787},
       {51, srsran_subcarrier_spacing_15kHz, SRSRAN_SSB_PATTERN_A, 3572, 1, 3574},
       {66, srsran_subcarrier_spacing_15kHz, SRSRAN_SSB_PATTERN_A, 5279, 1, 5494},
